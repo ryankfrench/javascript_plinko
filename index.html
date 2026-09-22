@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plinko pilot</title>
+  <style>
+    body {
+      margin: 24px;
+      background: #f7f6f3;
+      color: #1c2430;
+      font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+    .pilot-bar { max-width: 760px; margin: 0 auto 16px; }
+    .pilot-note { margin: 0 0 8px; color: #5c4a32; }
+    .pilot-controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    label { font-size: 0.95rem; }
+    select, button { font: inherit; }
+    #reset {
+      border: 1px solid #1c2430;
+      background: #fff;
+      border-radius: 6px;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+    #log:empty { display: none; }
+    #log {
+      max-width: 760px;
+      margin: 18px auto 0;
+      padding: 12px;
+      background: #fff;
+      border: 1px solid #d5d0c6;
+      border-radius: 8px;
+      overflow: auto;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <div class="pilot-bar">
+    <p class="pilot-note">Research-team pilot. This page is not shown to participants.</p>
+    <div class="pilot-controls">
+      <p id="round-label" style="margin: 0; font-weight: 650;"></p>
+      <label>
+        Drop duration
+        <select id="duration">
+          <option value="8000">8 s</option>
+          <option value="10000" selected>10 s</option>
+          <option value="12000">12 s</option>
+        </select>
+      </label>
+      <button id="reset" type="button">Reset pilot</button>
+    </div>
+  </div>
+  <div id="plinko-root"></div>
+  <pre id="log"></pre>
+  <script src="plinko.js"></script>
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      var fast = params.get("fast") === "1";
+      var round = 1;
+      var logs = [];
+      var handle = null;
+      var root = document.getElementById("plinko-root");
+      var logEl = document.getElementById("log");
+      var label = document.getElementById("round-label");
+
+      function dropDuration() {
+        return Number(document.getElementById("duration").value);
+      }
+
+      function render() {
+        logEl.textContent = logs.length ? JSON.stringify(logs, null, 2) : "";
+      }
+
+      function start() {
+        label.textContent = "Round " + round + (fast ? " (short timing)" : "");
+        if (handle) {
+          handle.destroy();
+          handle = null;
+        }
+        handle = window.Plinko.mount(root, {
+          round: round,
+          responseId: "pilot",
+          dropDurationMs: fast ? 1200 : dropDuration(),
+          messageDwellMs: fast ? 250 : 4000,
+          revealDwellMs: fast ? 250 : 4000,
+          onComplete: function (result) {
+            logs.push(result);
+            render();
+            if (!result.interrupted && round === 1) {
+              round = 2;
+              start();
+            }
+          }
+        });
+      }
+
+      document.getElementById("reset").addEventListener("click", function () {
+        window.sessionStorage.removeItem(window.Plinko.storageKey("pilot", 1));
+        window.sessionStorage.removeItem(window.Plinko.storageKey("pilot", 2));
+        logs = [];
+        round = 1;
+        render();
+        start();
+      });
+
+      render();
+      start();
+    })();
+  </script>
+</body>
+</html>
