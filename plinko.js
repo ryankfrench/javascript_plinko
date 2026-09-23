@@ -327,9 +327,11 @@
     var centerX = padX + 4 * spacing + binWidth / 2;
     var diskRadiusPx = spacing * disk.diskRadius;
     var pegRadiusPx = spacing * disk.pegRadius;
-    var pegTop = Math.max(46, Math.ceil(diskRadiusPx + 10));
     var pegBottom = binTop - Math.max(26, Math.ceil(diskRadiusPx + 12));
-    if (pegBottom - pegTop < 120) pegBottom = pegTop + 120;
+    var startY = -0.4 - (disk.diskRadius + disk.pegRadius);
+    var above = (-startY / LOGICAL_ROW) / (ROWS - 1);
+    var need = diskRadiusPx + 8;
+    var pegTop = Math.ceil((need + above * pegBottom) / (1 + above));
     var rowGap = (pegBottom - pegTop) / (ROWS - 1);
     return {
       width: width,
@@ -1061,7 +1063,6 @@
         view.ball = { x: rested.x, y: rested.y, settled: true };
       } else if (!view.ball || !view.path) {
         var rest = logicalToCanvas(logicalStart(options.diskRadius + options.pegRadius), geo);
-        if (rest.y < geo.diskRadiusPx + 2) rest.y = geo.diskRadiusPx + 2;
         view.ball = { x: rest.x, y: rest.y, settled: false };
       }
       drawBoard(surface.ctx, geo, view);
