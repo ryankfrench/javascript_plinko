@@ -91,7 +91,7 @@ if (rattles < 8) fail("interior channels should bounce more than once, saw " + r
 
 var walls = Plinko.wallsForStep(2, 1, 1);
 var gap = Plinko.diskSpec().gap;
-var overhead = { x: (walls.left.x + walls.right.x) / 2, y: walls.exitY - 0.58 };
+var overhead = { x: (walls.left.x + walls.right.x) / 2, y: walls.exitY - Plinko.LOGICAL_ROW };
 var launched = {
   x: overhead.x + 0.04,
   y: overhead.y + 0.2,

@@ -315,24 +315,25 @@
     document.head.appendChild(style);
   }
 
-  function layoutOf(width, height, disk) {
+  function layoutOf(width, disk) {
     var padX = 18;
     var gap = 4;
     var binCount = PAYOUTS.length;
-    var binH = Math.max(52, Math.round(height * 0.12));
-    var binTop = height - binH - 10;
     var inner = width - padX * 2;
     var binWidth = (inner - gap * (binCount - 1)) / binCount;
     var spacing = binWidth + gap;
     var centerX = padX + 4 * spacing + binWidth / 2;
     var diskRadiusPx = spacing * disk.diskRadius;
     var pegRadiusPx = spacing * disk.pegRadius;
-    var pegBottom = binTop - Math.max(26, Math.ceil(diskRadiusPx + 12));
+    var rowGap = spacing * LOGICAL_ROW;
     var startY = -0.4 - (disk.diskRadius + disk.pegRadius);
-    var above = (-startY / LOGICAL_ROW) / (ROWS - 1);
     var need = diskRadiusPx + 8;
-    var pegTop = Math.ceil((need + above * pegBottom) / (1 + above));
-    var rowGap = (pegBottom - pegTop) / (ROWS - 1);
+    var pegTop = Math.ceil(need + (-startY / LOGICAL_ROW) * rowGap);
+    var pegBottom = pegTop + (ROWS - 1) * rowGap;
+    var below = Math.max(26, Math.ceil(diskRadiusPx + 12));
+    var binH = Math.max(52, Math.round(width * 0.07));
+    var binTop = pegBottom + below;
+    var height = Math.ceil(binTop + binH + 10);
     return {
       width: width,
       height: height,
@@ -359,7 +360,7 @@
     };
   }
 
-  var LOGICAL_ROW = 0.58;
+  var LOGICAL_ROW = Math.sqrt(3) / 2;
   var DEFAULT_DISK_RADIUS = 0.2;
   var DEFAULT_PEG_RADIUS = 5 / 76;
 
@@ -661,6 +662,8 @@
     var pins = pinsNear(env.row);
     var stalled = false;
     var step;
+    // One row of rise still reaches the pin above. A harder climb stalls in the taller channel.
+    var maxUp = Math.sqrt(2 * g * LOGICAL_ROW);
     for (step = 0; step < 900; step++) {
       if (y > walls.exitY - 0.03 && vy > 0) {
         var pinX = vx >= 0 ? walls.right.x : walls.left.x;
@@ -744,6 +747,7 @@
       }
       if (!nearlyStill) stalled = false;
       if (hits >= 3 && vy < 0) vy = roundStep(vy * 0.97);
+      if (vy < -maxUp) vy = roundStep(-maxUp);
       points.push({ x: roundStep(x), y: roundStep(y) });
       if (y > walls.exitY && x > handoff.x0 && x < handoff.x1) {
         return {
@@ -1045,20 +1049,17 @@
 
     function ctx2d() {
       var cssWidth = canvas.clientWidth || 720;
-      var cssHeight = Math.max(380, Math.round(Math.min(cssWidth * 0.58, 440)));
-      canvas.style.height = cssHeight + "px";
+      var geo = layoutOf(cssWidth, {
+        diskRadius: options.diskRadius,
+        pegRadius: options.pegRadius
+      });
+      canvas.style.height = geo.height + "px";
       var dpr = Math.min((window.devicePixelRatio || 1), 2);
       canvas.width = Math.round(cssWidth * dpr);
-      canvas.height = Math.round(cssHeight * dpr);
+      canvas.height = Math.round(geo.height * dpr);
       var ctx = canvas.getContext("2d");
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      return {
-        ctx: ctx,
-        geo: layoutOf(cssWidth, cssHeight, {
-          diskRadius: options.diskRadius,
-          pegRadius: options.pegRadius
-        })
-      };
+      return { ctx: ctx, geo: geo };
     }
 
     function paint() {
@@ -1241,6 +1242,7 @@
   return {
     TASK_VERSION: TASK_VERSION,
     ROWS: ROWS,
+    LOGICAL_ROW: LOGICAL_ROW,
     PAYOUTS: PAYOUTS,
     WEIGHTS: WEIGHTS,
     DEFAULT_ENDOWMENT: DEFAULT_ENDOWMENT,
