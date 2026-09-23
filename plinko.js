@@ -200,6 +200,8 @@
       interrupted: false,
       animation: options.animation === "physics" ? "physics" : "guided",
       physics_fallback: false,
+      disk_radius: options.diskRadius,
+      peg_radius: options.pegRadius,
       drop_duration_ms: options.dropDurationMs,
       message_dwell_ms: options.messageDwellMs,
       reveal_dwell_ms: options.revealDwellMs,
@@ -292,7 +294,7 @@
     document.head.appendChild(style);
   }
 
-  function layoutOf(width, height) {
+  function layoutOf(width, height, disk) {
     var padX = 18;
     var gap = 4;
     var binCount = PAYOUTS.length;
@@ -302,8 +304,11 @@
     var binWidth = (inner - gap * (binCount - 1)) / binCount;
     var spacing = binWidth + gap;
     var centerX = padX + 4 * spacing + binWidth / 2;
-    var pegTop = 46;
-    var pegBottom = binTop - 26;
+    var diskRadiusPx = spacing * disk.diskRadius;
+    var pegRadiusPx = spacing * disk.pegRadius;
+    var pegTop = Math.max(46, Math.ceil(diskRadiusPx + 10));
+    var pegBottom = binTop - Math.max(26, Math.ceil(diskRadiusPx + 12));
+    if (pegBottom - pegTop < 120) pegBottom = pegTop + 120;
     var rowGap = (pegBottom - pegTop) / (ROWS - 1);
     return {
       width: width,
@@ -317,8 +322,10 @@
       centerX: centerX,
       pegTop: pegTop,
       rowGap: rowGap,
+      diskRadiusPx: diskRadiusPx,
+      pegRadiusPx: pegRadiusPx,
       yStart: 16,
-      binBallY: binTop - 14
+      binBallY: binTop - diskRadiusPx - 6
     };
   }
 
@@ -330,8 +337,14 @@
   }
 
   var LOGICAL_ROW = 0.58;
-  var LOGICAL_GAP = 14 / 76;
-  var LOGICAL_PEG_R = 5 / 76;
+  var DEFAULT_DISK_RADIUS = 0.2;
+  var DEFAULT_PEG_RADIUS = 5 / 76;
+
+  function diskSpec(diskRadius, pegRadius) {
+    var disk = typeof diskRadius === "number" && diskRadius > 0 ? diskRadius : DEFAULT_DISK_RADIUS;
+    var peg = typeof pegRadius === "number" && pegRadius > 0 ? pegRadius : DEFAULT_PEG_RADIUS;
+    return { diskRadius: disk, pegRadius: peg, gap: disk + peg };
+  }
 
   function roundStep(n) {
     return Math.round(n * 4096) / 4096;
@@ -356,21 +369,26 @@
     return theta;
   }
 
-  function shoulder(peg, dir, theta) {
+  function shoulder(peg, dir, theta, gap) {
     return {
-      x: peg.x + dir * Math.sin(theta) * LOGICAL_GAP,
-      y: peg.y - Math.cos(theta) * LOGICAL_GAP
+      x: peg.x + dir * Math.sin(theta) * gap,
+      y: peg.y - Math.cos(theta) * gap
     };
   }
 
-  function contactsFor(path, seed) {
-    var points = [{ x: 0, y: -0.4 }];
+  function logicalStart(gap) {
+    var y = -0.4 - gap;
+    return { x: 0, y: y };
+  }
+
+  function contactsFor(path, seed, gap) {
+    var points = [logicalStart(gap)];
     var pegs = [];
     var rights = 0;
     for (var r = 0; r < path.length; r++) {
       var dir = path.charAt(r) === "R" ? 1 : -1;
       var peg = logicalPeg(r, rights);
-      points.push(shoulder(peg, dir, exitAngle(seed >>> 0, r)));
+      points.push(shoulder(peg, dir, exitAngle(seed >>> 0, r), gap));
       pegs.push({ row: r, index: rights, dir: dir });
       if (dir === 1) rights += 1;
     }
@@ -403,14 +421,14 @@
     return (-vy + Math.sqrt(disc)) / g;
   }
 
-  function separateFromPeg(x, y, vx, vy, peg) {
+  function separateFromPeg(x, y, vx, vy, peg, gap) {
     var dx = x - peg.x;
     var dy = y - peg.y;
     var dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist >= LOGICAL_GAP || dist === 0) return null;
+    if (dist >= gap || dist === 0) return null;
     var nx = dx / dist;
     var ny = dy / dist;
-    var pen = LOGICAL_GAP - dist;
+    var pen = gap - dist;
     x = roundStep(x + nx * pen);
     y = roundStep(y + ny * pen);
     var vn = vx * nx + vy * ny;
@@ -451,7 +469,7 @@
     return { hit: false, points: points };
   }
 
-  function simulateHop(from, peg, endPoint) {
+  function simulateHop(from, peg, endPoint, gap) {
     var g = 2.4;
     var dt = 1 / 180;
     var dy = Math.max(endPoint.y - from.y, 0.02);
@@ -481,7 +499,7 @@
         for (p = 0; p < count; p++) {
           var other = logicalPeg(r, p);
           if (other.x === peg.x && other.y === peg.y) continue;
-          var pushed = separateFromPeg(x, y, vx, vy, other);
+          var pushed = separateFromPeg(x, y, vx, vy, other, gap);
           if (pushed) {
             x = pushed.x;
             y = pushed.y;
@@ -493,19 +511,20 @@
       var dx = x - peg.x;
       var dyPeg = y - peg.y;
       var dist = Math.sqrt(dx * dx + dyPeg * dyPeg);
-      if (dist <= LOGICAL_GAP + 0.02 && y >= peg.y - LOGICAL_GAP) {
+      if (dist <= gap + 0.02 && y >= peg.y - gap) {
         hit = true;
         points.push({ x: endPoint.x, y: endPoint.y, bin: endPoint.bin });
         break;
       }
-      if (y > peg.y + LOGICAL_GAP + 0.05) break;
+      if (y > peg.y + gap + 0.05) break;
       points.push({ x: x, y: y });
     }
     return { hit: hit, points: points };
   }
 
-  function guidedRoute(path, seed) {
-    var layout = contactsFor(path, seed >>> 0);
+  function guidedRoute(path, seed, diskRadius, pegRadius) {
+    var disk = diskSpec(diskRadius, pegRadius);
+    var layout = contactsFor(path, seed >>> 0, disk.gap);
     var hops = [];
     for (var i = 0; i < layout.points.length - 1; i++) {
       hops.push({ points: sampleGuidedHop(layout.points[i], layout.points[i + 1]), fallback: false });
@@ -515,17 +534,20 @@
       fallback: false,
       contacts: layout.pegs,
       bin: layout.bin,
+      diskRadius: disk.diskRadius,
+      pegRadius: disk.pegRadius,
       hops: hops
     };
   }
 
-  function simulatePhysics(path, seed) {
-    var layout = contactsFor(path, seed >>> 0);
+  function simulatePhysics(path, seed, diskRadius, pegRadius) {
+    var disk = diskSpec(diskRadius, pegRadius);
+    var layout = contactsFor(path, seed >>> 0, disk.gap);
     var hops = [];
     var fallback = false;
     for (var i = 0; i < layout.pegs.length; i++) {
       var peg = logicalPeg(layout.pegs[i].row, layout.pegs[i].index);
-      var sim = simulateHop(layout.points[i], peg, layout.points[i + 1]);
+      var sim = simulateHop(layout.points[i], peg, layout.points[i + 1], disk.gap);
       if (!sim.hit) {
         fallback = true;
         hops.push({ points: sampleGuidedHop(layout.points[i], layout.points[i + 1]), fallback: true });
@@ -547,13 +569,15 @@
       fallback: fallback,
       contacts: layout.pegs,
       bin: layout.bin,
+      diskRadius: disk.diskRadius,
+      pegRadius: disk.pegRadius,
       hops: hops
     };
   }
 
-  function routeFor(path, seed, animation) {
-    if (animation === "physics") return simulatePhysics(path, seed);
-    return guidedRoute(path, seed);
+  function routeFor(path, seed, animation, diskRadius, pegRadius) {
+    if (animation === "physics") return simulatePhysics(path, seed, diskRadius, pegRadius);
+    return guidedRoute(path, seed, diskRadius, pegRadius);
   }
 
   function logicalToCanvas(point, geo) {
@@ -605,14 +629,14 @@
       for (var p = 0; p <= r; p++) {
         var peg = pegPosition(geo, r, p);
         ctx.beginPath();
-        ctx.arc(peg.x, peg.y, 5, 0, Math.PI * 2);
+        ctx.arc(peg.x, peg.y, geo.pegRadiusPx, 0, Math.PI * 2);
         ctx.fill();
       }
     }
 
     if (view.ball) {
       ctx.beginPath();
-      ctx.arc(view.ball.x, view.ball.y, 9, 0, Math.PI * 2);
+      ctx.arc(view.ball.x, view.ball.y, geo.diskRadiusPx, 0, Math.PI * 2);
       ctx.fillStyle = "#c2410c";
       ctx.fill();
       ctx.lineWidth = 2;
@@ -648,6 +672,8 @@
           ? userOptions.revealDwellMs
           : 4000,
       animation: userOptions && userOptions.animation === "physics" ? "physics" : "guided",
+      diskRadius: diskSpec(userOptions && userOptions.diskRadius, userOptions && userOptions.pegRadius).diskRadius,
+      pegRadius: diskSpec(userOptions && userOptions.diskRadius, userOptions && userOptions.pegRadius).pegRadius,
       onComplete: userOptions && userOptions.onComplete ? userOptions.onComplete : function () {}
     };
 
@@ -716,7 +742,13 @@
       canvas.height = Math.round(cssHeight * dpr);
       var ctx = canvas.getContext("2d");
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      return { ctx: ctx, geo: layoutOf(cssWidth, cssHeight) };
+      return {
+        ctx: ctx,
+        geo: layoutOf(cssWidth, cssHeight, {
+          diskRadius: options.diskRadius,
+          pegRadius: options.pegRadius
+        })
+      };
     }
 
     function paint() {
@@ -726,10 +758,10 @@
       if (view.path && view.ball && view.ball.settled && view.highlight !== null) {
         var rested = logicalToCanvas(logicalBin(view.highlight), geo);
         view.ball = { x: rested.x, y: rested.y, settled: true };
-      } else if (!view.ball) {
-        view.ball = { x: geo.centerX, y: geo.yStart, settled: false };
-      } else if (!view.path) {
-        view.ball = { x: geo.centerX, y: geo.yStart, settled: false };
+      } else if (!view.ball || !view.path) {
+        var rest = logicalToCanvas(logicalStart(options.diskRadius + options.pegRadius), geo);
+        if (rest.y < geo.diskRadiusPx + 2) rest.y = geo.diskRadiusPx + 2;
+        view.ball = { x: rest.x, y: rest.y, settled: false };
       }
       drawBoard(surface.ctx, geo, view);
     }
@@ -846,7 +878,7 @@
       declineBtn.disabled = true;
       var trial = drawTrial();
       record = createRecord(options, decision, trial);
-      route = routeFor(trial.path, trial.seed, options.animation);
+      route = routeFor(trial.path, trial.seed, options.animation, options.diskRadius, options.pegRadius);
       record.physics_fallback = route.fallback;
       writeStored(key, record);
       beginTimedTrial(record);
@@ -911,6 +943,9 @@
     expectedPayout: expectedPayout,
     segmentDurations: segmentDurations,
     storageKey: storageKey,
+    DEFAULT_DISK_RADIUS: DEFAULT_DISK_RADIUS,
+    DEFAULT_PEG_RADIUS: DEFAULT_PEG_RADIUS,
+    diskSpec: diskSpec,
     guidedRoute: guidedRoute,
     simulatePhysics: simulatePhysics,
     hopPoint: hopPoint,

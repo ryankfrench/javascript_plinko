@@ -36,6 +36,8 @@ The early part of the drop accelerates. The last two segments take half of the d
 
 A pilot can switch on `animation: "physics"`. That drop integrates gravity and peg collisions, then forces each bounce to leave on the predetermined side. The bin and the payout do not change. If a hop cannot reach its peg, that hop plays the guided arc instead and the record sets `physics_fallback` to true. The study loader does not pass this option.
 
+`diskRadius` and `pegRadius` are fractions of the distance from one pin to the next. The defaults are `0.2` and about `0.066`, so the disk's diameter is 40% of that span. A larger disk meets each pin farther out and fills more of the gap, which changes the shape of the bounce. It does not change the drawn bin. The disk still has to fit between pins: keep `2 * diskRadius` below `1 - 2 * pegRadius`. The pilot page has Disk and Pins controls. Both values are stored as `disk_radius` and `peg_radius`.
+
 ## Host the script
 
 Upload [plinko.js](plinko.js) to an HTTPS host that serves it as `application/javascript`. A lab server or jsDelivr works. GitHub's raw file URL serves `text/plain`, and the loader will not run it.

@@ -57,6 +57,21 @@
           <option value="physics">Physics</option>
         </select>
       </label>
+      <label>
+        Disk
+        <select id="disk">
+          <option value="0.12">Small</option>
+          <option value="0.2" selected>Medium</option>
+          <option value="0.26">Large</option>
+        </select>
+      </label>
+      <label>
+        Pins
+        <select id="peg">
+          <option value="0.066" selected>Thin</option>
+          <option value="0.09">Medium</option>
+        </select>
+      </label>
       <button id="reset" type="button">Reset pilot</button>
     </div>
   </div>
@@ -92,6 +107,8 @@
           round: round,
           responseId: "pilot",
           animation: document.getElementById("motion").value,
+          diskRadius: Number(document.getElementById("disk").value),
+          pegRadius: Number(document.getElementById("peg").value),
           dropDurationMs: fast ? 1200 : dropDuration(),
           messageDwellMs: fast ? 250 : 4000,
           revealDwellMs: fast ? 250 : 4000,
