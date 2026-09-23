@@ -486,7 +486,14 @@
     y = roundStep(y + ny * pen);
     var vn = vx * nx + vy * ny;
     if (vn >= 0) return { x: x, y: y, vx: vx, vy: vy, nx: nx, ny: ny, reflected: false };
+    // A moving brush sheds the speed aimed into the pin. A harder hit bounces.
     if (vn > -0.35) {
+      var tx = vx - vn * nx;
+      var ty = vy - vn * ny;
+      if (tx * tx + ty * ty > 0.06) {
+        vx = roundStep(tx);
+        vy = roundStep(ty);
+      }
       return { x: x, y: y, vx: vx, vy: vy, nx: nx, ny: ny, reflected: false };
     }
     var bounce = 1 + restitution;
