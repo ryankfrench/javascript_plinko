@@ -198,7 +198,7 @@
       earnings: money.earnings,
       signed_outcome: money.signed_outcome,
       interrupted: false,
-      animation: options.animation === "physics" ? "physics" : "guided",
+      animation: options.animation === "guided-physics" ? "guided-physics" : "guided",
       physics_fallback: false,
       disk_radius: options.diskRadius,
       peg_radius: options.pegRadius,
@@ -565,7 +565,7 @@
       hops.push({ points: intoBin.points, fallback: false });
     }
     return {
-      animation: "physics",
+      animation: "guided-physics",
       fallback: fallback,
       contacts: layout.pegs,
       bin: layout.bin,
@@ -576,7 +576,7 @@
   }
 
   function routeFor(path, seed, animation, diskRadius, pegRadius) {
-    if (animation === "physics") return simulatePhysics(path, seed, diskRadius, pegRadius);
+    if (animation === "guided-physics") return simulatePhysics(path, seed, diskRadius, pegRadius);
     return guidedRoute(path, seed, diskRadius, pegRadius);
   }
 
@@ -671,7 +671,7 @@
         userOptions && userOptions.revealDwellMs !== undefined
           ? userOptions.revealDwellMs
           : 4000,
-      animation: userOptions && userOptions.animation === "physics" ? "physics" : "guided",
+      animation: userOptions && userOptions.animation === "guided-physics" ? "guided-physics" : "guided",
       diskRadius: diskSpec(userOptions && userOptions.diskRadius, userOptions && userOptions.pegRadius).diskRadius,
       pegRadius: diskSpec(userOptions && userOptions.diskRadius, userOptions && userOptions.pegRadius).pegRadius,
       onComplete: userOptions && userOptions.onComplete ? userOptions.onComplete : function () {}

@@ -1,5 +1,5 @@
 /*
- * The steered drop must hit the predetermined pegs.
+ * Guided Physics must hit the predetermined pegs.
  * Usage: node test/physics.js
  */
 var Plinko = require("../plinko.js");

@@ -34,7 +34,7 @@ Expected payout is 2575/256 = $10.0586, so the expected value is about 1.006 tim
 
 The early part of the drop accelerates. The last two segments take half of the drop time and slow down into the bin. The ball meets each peg on the shoulder it is leaving and falls in a shallow arc. That playback is `animation: "guided"`, and it is what Qualtrics uses.
 
-A pilot can switch on `animation: "physics"`. That drop integrates gravity and peg collisions, then forces each bounce to leave on the predetermined side. The bin and the payout do not change. If a hop cannot reach its peg, that hop plays the guided arc instead and the record sets `physics_fallback` to true. The study loader does not pass this option.
+A pilot can switch on Guided Physics with `animation: "guided-physics"`. That drop integrates gravity and peg collisions, then forces each bounce to leave on the predetermined side. The bin and the payout do not change. If a hop cannot reach its peg, that hop plays the guided arc instead and the record sets `physics_fallback` to true. The study loader does not pass this option.
 
 `diskRadius` and `pegRadius` are fractions of the distance from one pin to the next. The defaults are `0.2` and about `0.066`, so the disk's diameter is 40% of that span. A larger disk meets each pin farther out and fills more of the gap, which changes the shape of the bounce. It does not change the drawn bin. The disk still has to fit between pins: keep `2 * diskRadius` below `1 - 2 * pegRadius`. The pilot page has Disk and Pins controls. Both values are stored as `disk_radius` and `peg_radius`.
 
@@ -76,7 +76,7 @@ revealDwellMs: 4000
 
 ## What is stored
 
-`round`, `decision` (`play` or `decline`), `seed`, `path`, `bin`, `payout`, `endowment`, `earnings`, `signed_outcome`, `interrupted`, `animation` (`guided` or `physics`), `physics_fallback`, `drop_duration_ms`, `message_dwell_ms`, `reveal_dwell_ms`, and these ISO timestamps from the participant's computer clock: `choice_iso`, `message_onset_iso`, `message_offset_iso`, `animation_start_iso`, `animation_end_iso`, `reveal_onset_iso`, `next_enabled_iso`.
+`round`, `decision` (`play` or `decline`), `seed`, `path`, `bin`, `payout`, `endowment`, `earnings`, `signed_outcome`, `interrupted`, `animation` (`guided` or `guided-physics`), `physics_fallback`, `drop_duration_ms`, `message_dwell_ms`, `reveal_dwell_ms`, and these ISO timestamps from the participant's computer clock: `choice_iso`, `message_onset_iso`, `message_offset_iso`, `animation_start_iso`, `animation_end_iso`, `reveal_onset_iso`, `next_enabled_iso`.
 
 `message_offset_iso` and `animation_start_iso` are the same moment: the end of the reading dwell, when the ball starts. The sentence stays on screen until the landing. `payout` is a number, so $2.50 is stored as `2.5`.
 
@@ -84,7 +84,7 @@ Timestamps are the machine clock FaceReader has to be aligned to. This task does
 
 ## Pilot page
 
-Open [index.html](index.html) on a local web server. It runs both rounds, shows the JSON, and can switch the drop among 8, 10, and 12 seconds. The Motion control chooses guided arcs or the steered physics playback. Reset clears the saved pilot trials. Add `?fast=1` to shorten the dwells while checking the flow. Do not use this page with participants.
+Open [index.html](index.html) on a local web server. It runs both rounds, shows the JSON, and can switch the drop among 8, 10, and 12 seconds. The Motion control chooses guided arcs or Guided Physics. Reset clears the saved pilot trials. Add `?fast=1` to shorten the dwells while checking the flow. Do not use this page with participants.
 
 ```bash
 python3 -m http.server 8765
@@ -99,7 +99,7 @@ node test/distribution.js
 node test/physics.js
 ```
 
-The first runs 100,000 draws and checks the binomial counts, the path, the payouts, and the expected value. The second runs every 8-step path through the steered physics drop and checks that the pegs and the bin match the path.
+The first runs 100,000 draws and checks the binomial counts, the path, the payouts, and the expected value. The second runs every 8-step path through Guided Physics and checks that the pegs and the bin match the path.
 
 ## Preview checklist
 

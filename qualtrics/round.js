@@ -70,7 +70,7 @@ Qualtrics.SurveyEngine.addOnload(function () {
     window.Plinko.mount(root, {
       round: ROUND,
       responseId: "${e://Field/ResponseID}",
-      // animation defaults to "guided". Pass animation: "physics" only for a pilot.
+      // animation defaults to "guided". Pass animation: "guided-physics" only for a pilot.
       onComplete: function (result) {
         write(result);
         q.showNextButton();
