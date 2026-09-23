@@ -50,6 +50,13 @@
           <option value="12000">12 s</option>
         </select>
       </label>
+      <label>
+        Motion
+        <select id="motion">
+          <option value="guided" selected>Guided arcs</option>
+          <option value="physics">Physics</option>
+        </select>
+      </label>
       <button id="reset" type="button">Reset pilot</button>
     </div>
   </div>
@@ -84,6 +91,7 @@
         handle = window.Plinko.mount(root, {
           round: round,
           responseId: "pilot",
+          animation: document.getElementById("motion").value,
           dropDurationMs: fast ? 1200 : dropDuration(),
           messageDwellMs: fast ? 250 : 4000,
           revealDwellMs: fast ? 250 : 4000,

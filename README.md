@@ -32,7 +32,9 @@ Eight fair left/right steps. The bin is the number of steps to the right (0 thro
 
 Expected payout is 2575/256 = $10.0586, so the expected value is about 1.006 times the endowment. Each drop uses a new seed. The log stores the seed and the path, for example `RLRRRLRR`. The choice is not an input to the draw.
 
-The early part of the drop accelerates. The last two segments take half of the drop time and slow down into the bin.
+The early part of the drop accelerates. The last two segments take half of the drop time and slow down into the bin. The ball meets each peg on the shoulder it is leaving and falls in a shallow arc. That playback is `animation: "guided"`, and it is what Qualtrics uses.
+
+A pilot can switch on `animation: "physics"`. That drop integrates gravity and peg collisions, then forces each bounce to leave on the predetermined side. The bin and the payout do not change. If a hop cannot reach its peg, that hop plays the guided arc instead and the record sets `physics_fallback` to true. The study loader does not pass this option.
 
 ## Host the script
 
@@ -72,7 +74,7 @@ revealDwellMs: 4000
 
 ## What is stored
 
-`round`, `decision` (`play` or `decline`), `seed`, `path`, `bin`, `payout`, `endowment`, `earnings`, `signed_outcome`, `interrupted`, `drop_duration_ms`, `message_dwell_ms`, `reveal_dwell_ms`, and these ISO timestamps from the participant's computer clock: `choice_iso`, `message_onset_iso`, `message_offset_iso`, `animation_start_iso`, `animation_end_iso`, `reveal_onset_iso`, `next_enabled_iso`.
+`round`, `decision` (`play` or `decline`), `seed`, `path`, `bin`, `payout`, `endowment`, `earnings`, `signed_outcome`, `interrupted`, `animation` (`guided` or `physics`), `physics_fallback`, `drop_duration_ms`, `message_dwell_ms`, `reveal_dwell_ms`, and these ISO timestamps from the participant's computer clock: `choice_iso`, `message_onset_iso`, `message_offset_iso`, `animation_start_iso`, `animation_end_iso`, `reveal_onset_iso`, `next_enabled_iso`.
 
 `message_offset_iso` and `animation_start_iso` are the same moment: the end of the reading dwell, when the ball starts. The sentence stays on screen until the landing. `payout` is a number, so $2.50 is stored as `2.5`.
 
@@ -80,7 +82,7 @@ Timestamps are the machine clock FaceReader has to be aligned to. This task does
 
 ## Pilot page
 
-Open [index.html](index.html) on a local web server. It runs both rounds, shows the JSON, and can switch the drop among 8, 10, and 12 seconds. Reset clears the saved pilot trials. Add `?fast=1` to shorten the dwells while checking the flow. Do not use this page with participants.
+Open [index.html](index.html) on a local web server. It runs both rounds, shows the JSON, and can switch the drop among 8, 10, and 12 seconds. The Motion control chooses guided arcs or the steered physics playback. Reset clears the saved pilot trials. Add `?fast=1` to shorten the dwells while checking the flow. Do not use this page with participants.
 
 ```bash
 python3 -m http.server 8765
@@ -92,9 +94,10 @@ Then open `http://localhost:8765/`.
 
 ```bash
 node test/distribution.js
+node test/physics.js
 ```
 
-That runs 100,000 draws and checks the binomial counts, the path, the payouts, and the expected value.
+The first runs 100,000 draws and checks the binomial counts, the path, the payouts, and the expected value. The second runs every 8-step path through the steered physics drop and checks that the pegs and the bin match the path.
 
 ## Preview checklist
 

@@ -12,7 +12,7 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  var TASK_VERSION = 1;
+  var TASK_VERSION = 2;
   var ROWS = 8;
   var PAYOUTS = [100, 50, 15, 5, 2.5, 5, 15, 50, 100];
   var WEIGHTS = [1, 8, 28, 56, 70, 56, 28, 8, 1];
@@ -198,6 +198,8 @@
       earnings: money.earnings,
       signed_outcome: money.signed_outcome,
       interrupted: false,
+      animation: options.animation === "physics" ? "physics" : "guided",
+      physics_fallback: false,
       drop_duration_ms: options.dropDurationMs,
       message_dwell_ms: options.messageDwellMs,
       reveal_dwell_ms: options.revealDwellMs,
@@ -327,24 +329,254 @@
     };
   }
 
-  function binCenterX(geo, bin) {
-    return geo.padX + bin * (geo.binWidth + geo.gap) + geo.binWidth / 2;
+  var LOGICAL_ROW = 0.58;
+  var LOGICAL_GAP = 14 / 76;
+  var LOGICAL_PEG_R = 5 / 76;
+
+  function roundStep(n) {
+    return Math.round(n * 4096) / 4096;
   }
 
-  function buildPoints(path, geo) {
-    var points = [{ x: geo.centerX, y: geo.yStart }];
+  function logicalPeg(row, index) {
+    return {
+      x: index - row / 2,
+      y: row * LOGICAL_ROW
+    };
+  }
+
+  function logicalBin(bin) {
+    return { x: bin - 4, y: 7 * LOGICAL_ROW + 0.17, bin: true };
+  }
+
+  function exitAngle(seed, row) {
+    var rng = mulberry32((seed + row * 0x9e3779b9) >>> 0);
+    var theta = 0.62 + (rng() - 0.5) * ((8 * Math.PI) / 180);
+    if (theta < 0.4) theta = 0.4;
+    if (theta > 0.95) theta = 0.95;
+    return theta;
+  }
+
+  function shoulder(peg, dir, theta) {
+    return {
+      x: peg.x + dir * Math.sin(theta) * LOGICAL_GAP,
+      y: peg.y - Math.cos(theta) * LOGICAL_GAP
+    };
+  }
+
+  function contactsFor(path, seed) {
+    var points = [{ x: 0, y: -0.4 }];
+    var pegs = [];
     var rights = 0;
     for (var r = 0; r < path.length; r++) {
-      var peg = pegPosition(geo, r, rights);
-      points.push({ x: peg.x, y: peg.y });
-      if (path.charAt(r) === "R") rights += 1;
+      var dir = path.charAt(r) === "R" ? 1 : -1;
+      var peg = logicalPeg(r, rights);
+      points.push(shoulder(peg, dir, exitAngle(seed >>> 0, r)));
+      pegs.push({ row: r, index: rights, dir: dir });
+      if (dir === 1) rights += 1;
     }
-    points.push({ x: binCenterX(geo, rights), y: geo.binBallY });
+    points.push(logicalBin(rights));
+    return { points: points, pegs: pegs, bin: rights };
+  }
+
+  function hopPoint(from, to, t) {
+    var dy = to.y - from.y;
+    var g = dy > 0 ? dy * 0.85 : 0;
+    var vy0 = dy - 0.5 * g;
+    return {
+      x: from.x + (to.x - from.x) * t,
+      y: from.y + vy0 * t + 0.5 * g * t * t,
+      bin: to.bin && t === 1 ? true : undefined
+    };
+  }
+
+  function sampleGuidedHop(from, to) {
+    var points = [];
+    var steps = 16;
+    for (var i = 0; i <= steps; i++) points.push(hopPoint(from, to, i / steps));
     return points;
   }
 
-  function easeInQuad(t) {
-    return t * t;
+  function fallTime(dy, vy, g) {
+    if (dy <= 0.0001) return 0.04;
+    var disc = vy * vy + 2 * g * dy;
+    if (disc < 0) disc = 0;
+    return (-vy + Math.sqrt(disc)) / g;
+  }
+
+  function separateFromPeg(x, y, vx, vy, peg) {
+    var dx = x - peg.x;
+    var dy = y - peg.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist >= LOGICAL_GAP || dist === 0) return null;
+    var nx = dx / dist;
+    var ny = dy / dist;
+    var pen = LOGICAL_GAP - dist;
+    x = roundStep(x + nx * pen);
+    y = roundStep(y + ny * pen);
+    var vn = vx * nx + vy * ny;
+    if (vn < 0) {
+      vx = roundStep(vx - vn * nx);
+      vy = roundStep(vy - vn * ny);
+    }
+    return { x: x, y: y, vx: vx, vy: vy };
+  }
+
+  function simulateFall(from, endPoint) {
+    var g = 2.4;
+    var dt = 1 / 180;
+    var x = from.x;
+    var y = from.y;
+    var flight = fallTime(Math.max(endPoint.y - from.y, 0.02), 0.2, g);
+    var vx = flight > 0 ? (endPoint.x - from.x) / flight : 0;
+    var vy = 0.2;
+    var points = [{ x: x, y: y }];
+    var step;
+    for (step = 0; step < 400; step++) {
+      var remain = endPoint.y - y;
+      var predT = fallTime(Math.max(remain, 0.01), Math.max(vy, 0.05), g);
+      var err = endPoint.x - (x + vx * predT);
+      var ax = err * 1.2;
+      if (ax > 1) ax = 1;
+      if (ax < -1) ax = -1;
+      vx = roundStep(vx + ax * dt);
+      vy = roundStep(vy + g * dt);
+      x = roundStep(x + vx * dt);
+      y = roundStep(y + vy * dt);
+      points.push({ x: x, y: y });
+      if (y >= endPoint.y) {
+        points[points.length - 1] = { x: endPoint.x, y: endPoint.y, bin: true };
+        return { hit: true, points: points };
+      }
+    }
+    return { hit: false, points: points };
+  }
+
+  function simulateHop(from, peg, endPoint) {
+    var g = 2.4;
+    var dt = 1 / 180;
+    var dy = Math.max(endPoint.y - from.y, 0.02);
+    var flight = fallTime(dy, 0.28, g);
+    var x = from.x;
+    var y = from.y;
+    var vx = flight > 0 ? (endPoint.x - from.x) / flight : 0;
+    var vy = 0.28;
+    var points = [{ x: x, y: y }];
+    var hit = false;
+    var step;
+    for (step = 0; step < 500; step++) {
+      var remain = endPoint.y - y;
+      var predT = fallTime(Math.max(remain, 0.01), Math.max(vy, 0.05), g);
+      var err = endPoint.x - (x + vx * predT);
+      var ax = err * 1.6;
+      if (ax > 1.35) ax = 1.35;
+      if (ax < -1.35) ax = -1.35;
+      vx = roundStep(vx + ax * dt);
+      vy = roundStep(vy + g * dt);
+      x = roundStep(x + vx * dt);
+      y = roundStep(y + vy * dt);
+      var r;
+      for (r = 0; r < ROWS; r++) {
+        var count = r + 1;
+        var p;
+        for (p = 0; p < count; p++) {
+          var other = logicalPeg(r, p);
+          if (other.x === peg.x && other.y === peg.y) continue;
+          var pushed = separateFromPeg(x, y, vx, vy, other);
+          if (pushed) {
+            x = pushed.x;
+            y = pushed.y;
+            vx = pushed.vx;
+            vy = pushed.vy;
+          }
+        }
+      }
+      var dx = x - peg.x;
+      var dyPeg = y - peg.y;
+      var dist = Math.sqrt(dx * dx + dyPeg * dyPeg);
+      if (dist <= LOGICAL_GAP + 0.02 && y >= peg.y - LOGICAL_GAP) {
+        hit = true;
+        points.push({ x: endPoint.x, y: endPoint.y, bin: endPoint.bin });
+        break;
+      }
+      if (y > peg.y + LOGICAL_GAP + 0.05) break;
+      points.push({ x: x, y: y });
+    }
+    return { hit: hit, points: points };
+  }
+
+  function guidedRoute(path, seed) {
+    var layout = contactsFor(path, seed >>> 0);
+    var hops = [];
+    for (var i = 0; i < layout.points.length - 1; i++) {
+      hops.push({ points: sampleGuidedHop(layout.points[i], layout.points[i + 1]), fallback: false });
+    }
+    return {
+      animation: "guided",
+      fallback: false,
+      contacts: layout.pegs,
+      bin: layout.bin,
+      hops: hops
+    };
+  }
+
+  function simulatePhysics(path, seed) {
+    var layout = contactsFor(path, seed >>> 0);
+    var hops = [];
+    var fallback = false;
+    for (var i = 0; i < layout.pegs.length; i++) {
+      var peg = logicalPeg(layout.pegs[i].row, layout.pegs[i].index);
+      var sim = simulateHop(layout.points[i], peg, layout.points[i + 1]);
+      if (!sim.hit) {
+        fallback = true;
+        hops.push({ points: sampleGuidedHop(layout.points[i], layout.points[i + 1]), fallback: true });
+      } else {
+        hops.push({ points: sim.points, fallback: false });
+      }
+    }
+    var lastFrom = layout.points[layout.points.length - 2];
+    var lastTo = layout.points[layout.points.length - 1];
+    var intoBin = simulateFall(lastFrom, lastTo);
+    if (!intoBin.hit) {
+      fallback = true;
+      hops.push({ points: sampleGuidedHop(lastFrom, lastTo), fallback: true });
+    } else {
+      hops.push({ points: intoBin.points, fallback: false });
+    }
+    return {
+      animation: "physics",
+      fallback: fallback,
+      contacts: layout.pegs,
+      bin: layout.bin,
+      hops: hops
+    };
+  }
+
+  function routeFor(path, seed, animation) {
+    if (animation === "physics") return simulatePhysics(path, seed);
+    return guidedRoute(path, seed);
+  }
+
+  function logicalToCanvas(point, geo) {
+    return {
+      x: geo.centerX + point.x * geo.spacing,
+      y: point.bin ? geo.binBallY : geo.pegTop + (point.y / LOGICAL_ROW) * geo.rowGap
+    };
+  }
+
+  function pointOnHop(hop, t) {
+    var pts = hop.points;
+    var scaled = t * (pts.length - 1);
+    var i = Math.floor(scaled);
+    if (i >= pts.length - 1) return pts[pts.length - 1];
+    if (i < 0) i = 0;
+    var f = scaled - i;
+    var a = pts[i];
+    var b = pts[i + 1];
+    return {
+      x: a.x + (b.x - a.x) * f,
+      y: a.y + (b.y - a.y) * f,
+      bin: b.bin && f > 0.999 ? true : undefined
+    };
   }
 
   function easeOutCubic(t) {
@@ -415,6 +647,7 @@
         userOptions && userOptions.revealDwellMs !== undefined
           ? userOptions.revealDwellMs
           : 4000,
+      animation: userOptions && userOptions.animation === "physics" ? "physics" : "guided",
       onComplete: userOptions && userOptions.onComplete ? userOptions.onComplete : function () {}
     };
 
@@ -471,6 +704,7 @@
     var choosing = false;
     var record = null;
     var view = { ball: null, highlight: null, path: null };
+    var route = null;
     var key = storageKey(options.responseId, options.round);
 
     function ctx2d() {
@@ -489,9 +723,9 @@
       if (dead) return;
       var surface = ctx2d();
       var geo = surface.geo;
-      if (view.path && view.ball && view.ball.settled) {
-        var pts = buildPoints(view.path, geo);
-        view.ball = { x: pts[pts.length - 1].x, y: pts[pts.length - 1].y, settled: true };
+      if (view.path && view.ball && view.ball.settled && view.highlight !== null) {
+        var rested = logicalToCanvas(logicalBin(view.highlight), geo);
+        view.ball = { x: rested.x, y: rested.y, settled: true };
       } else if (!view.ball) {
         view.ball = { x: geo.centerX, y: geo.yStart, settled: false };
       } else if (!view.path) {
@@ -555,7 +789,6 @@
         if (startedAt === null) startedAt = ts;
         var elapsed = ts - startedAt;
         var surface = ctx2d();
-        var points = buildPoints(settledRecord.path, surface.geo);
         var acc = 0;
         var idx = durations.length - 1;
         var localT = 1;
@@ -569,16 +802,12 @@
         }
         if (localT < 0) localT = 0;
         if (localT > 1) localT = 1;
-        var eased = idx >= durations.length - 2 ? easeOutCubic(localT) : easeInQuad(localT);
-        var from = points[idx];
-        var to = points[idx + 1];
+        var eased = idx >= durations.length - 2 ? easeOutCubic(localT) : localT;
+        var logical = pointOnHop(route.hops[idx], eased);
+        var canvasPoint = logicalToCanvas(logical, surface.geo);
         view.path = settledRecord.path;
         view.highlight = null;
-        view.ball = {
-          x: from.x + (to.x - from.x) * eased,
-          y: from.y + (to.y - from.y) * eased,
-          settled: false
-        };
+        view.ball = { x: canvasPoint.x, y: canvasPoint.y, settled: false };
         drawBoard(surface.ctx, surface.geo, view);
         if (elapsed >= total) {
           var doneAt = new Date().toISOString();
@@ -617,6 +846,8 @@
       declineBtn.disabled = true;
       var trial = drawTrial();
       record = createRecord(options, decision, trial);
+      route = routeFor(trial.path, trial.seed, options.animation);
+      record.physics_fallback = route.fallback;
       writeStored(key, record);
       beginTimedTrial(record);
     }
@@ -680,6 +911,9 @@
     expectedPayout: expectedPayout,
     segmentDurations: segmentDurations,
     storageKey: storageKey,
+    guidedRoute: guidedRoute,
+    simulatePhysics: simulatePhysics,
+    hopPoint: hopPoint,
     mount: mount
   };
 });
