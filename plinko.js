@@ -484,6 +484,9 @@
     y = roundStep(y + ny * pen);
     var vn = vx * nx + vy * ny;
     if (vn >= 0) return { x: x, y: y, vx: vx, vy: vy, nx: nx, ny: ny, reflected: false };
+    if (vn > -0.35) {
+      return { x: x, y: y, vx: vx, vy: vy, nx: nx, ny: ny, reflected: false };
+    }
     var bounce = 1 + restitution;
     return {
       x: x,
@@ -546,23 +549,35 @@
     return speed;
   }
 
-  function capHorizontal(x, y, vx, vy, leftX, rightX, targetY) {
-    var targetX = vx >= 0 ? rightX : leftX;
-    var safe = maxSafeSpeed(x, y, vy, targetX, targetY) * 0.96;
+  function capHorizontal(x, y, vx, vy, leftX, rightX, targetY, gap) {
+    var pinX = vx >= 0 ? rightX : leftX;
+    var t = (pinX - x) / vx;
+    if (t > 0.001) {
+      var yAt = y + vy * t + 1.2 * t * t;
+      if (yAt >= targetY - gap) return roundStep(vx);
+    }
+    var safe = maxSafeSpeed(x, y, vy, pinX, targetY) * 0.96;
     if (Math.abs(vx) > safe) vx = (vx >= 0 ? 1 : -1) * safe;
     return roundStep(vx);
   }
 
-  function brakeHorizontal(x, y, vx, vy, leftX, rightX, targetY) {
-    var targetX = vx >= 0 ? rightX : leftX;
-    var safe = maxSafeSpeed(x, y, vy, targetX, targetY) * 0.96;
-    var speed = Math.abs(vx);
-    if (speed > safe) {
-      speed -= 3.2 / 180;
-      if (speed < safe) speed = safe;
-      vx = (vx >= 0 ? 1 : -1) * speed;
+  function headingInto(x, y, vx, vy, pinX, pinY, gap) {
+    var g = 2.4;
+    var dt = 1 / 180;
+    var cx = x;
+    var cy = y;
+    var cvy = vy;
+    var i;
+    for (i = 0; i < 48; i++) {
+      cvy += g * dt;
+      cx += vx * dt;
+      cy += cvy * dt;
+      if (cy > pinY + gap) return false;
+      var dx = cx - pinX;
+      var dy = cy - pinY;
+      if (dx * dx + dy * dy < gap * gap) return true;
     }
-    return roundStep(vx);
+    return false;
   }
 
   function brakeLanding(x, y, vx, vy, x0, x1, targetY) {
@@ -573,16 +588,29 @@
     var gate1 = x1 - pad;
     var dy = targetY - y;
     if (dy <= 0) {
-      if (x >= gate1 && vx > 0) return roundStep(-Math.abs(vx) * 0.5);
-      if (x <= gate0 && vx < 0) return roundStep(Math.abs(vx) * 0.5);
-      return vx;
+      var span = Math.max(vy, 0.4);
+      if (x > gate1) {
+        var pullRight = -Math.min(2, (x - gate1) * span / 0.12);
+        if (vx > pullRight) vx = pullRight;
+      } else if (x < gate0) {
+        var pullLeft = Math.min(2, (gate0 - x) * span / 0.12);
+        if (vx < pullLeft) vx = pullLeft;
+      }
+      return roundStep(vx);
     }
     var disc = vy * vy + 2 * g * dy;
     var t = (-vy + Math.sqrt(Math.max(0, disc))) / g;
-    if (!(t > 0.001)) return vx;
+    if (!(t > 0.02)) return vx;
     var land = x + vx * t;
-    if (land > gate1 && vx > (gate1 - x) / t) vx = (gate1 - x) / t;
-    if (land < gate0 && vx < (gate0 - x) / t) vx = (gate0 - x) / t;
+    if (land > gate1 && vx > 0) {
+      var need = (gate1 - x) / t;
+      if (need < 0) need = 0;
+      if (vx > need) vx = need;
+    } else if (land < gate0 && vx < 0) {
+      var needLeft = (gate0 - x) / t;
+      if (needLeft > 0) needLeft = 0;
+      if (vx < needLeft) vx = needLeft;
+    }
     return roundStep(vx);
   }
 
@@ -606,16 +634,15 @@
     var y = from.y;
     var vx = from.vx;
     var vy = from.vy;
-    var kick = (rng() - 0.5) * 0.1;
-    if (vy === undefined) vy = 0.08 + rng() * 0.14;
-    if (!env.preserveVelocity) {
+    if (vx === undefined || vy === undefined) {
       var goRight = rng() < 0.5;
       var targetX = goRight ? walls.right.x : walls.left.x;
       var sign = targetX >= x ? 1 : -1;
+      if (vy === undefined) vy = 0.08 + rng() * 0.14;
       var safe = maxSafeSpeed(x, y, vy, targetX, walls.exitY);
       vx = sign * safe * (0.78 + rng() * 0.16);
     }
-    vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY);
+    vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY, gap);
     var points = [{ x: roundStep(x), y: roundStep(y) }];
     var hits = 0;
     var overheadHits = 0;
@@ -626,9 +653,11 @@
     var stalled = false;
     var step;
     for (step = 0; step < 900; step++) {
-      vx = brakeHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY);
-      if (y > walls.exitY - 0.08 && vy > 0) {
-        vx = brakeLanding(x, y, vx, vy, handoff.x0, handoff.x1, walls.exitY);
+      if (y > walls.exitY - 0.03 && vy > 0) {
+        var pinX = vx >= 0 ? walls.right.x : walls.left.x;
+        if (!headingInto(x, y, vx, vy, pinX, walls.exitY, gap)) {
+          vx = brakeLanding(x, y, vx, vy, handoff.x0, handoff.x1, walls.exitY);
+        }
       }
       vy = roundStep(vy + g * dt);
       x = roundStep(x + vx * dt);
@@ -646,7 +675,6 @@
           if (dist < gap && (best === null || dist < best.dist)) best = { peg: peg, dist: dist };
         }
         if (!best) break;
-        var incoming = Math.sqrt(vx * vx + vy * vy);
         var bounced = reflectDisk(x, y, vx, vy, best.peg, gap, restitution);
         if (!bounced) break;
         x = bounced.x;
@@ -661,11 +689,7 @@
             overhead = { nx: bounced.nx, ny: bounced.ny, vx: bounced.vx, vy: bounced.vy };
           }
         }
-        var kickScale = incoming < 1 ? incoming : 1;
-        vx = roundStep(vx + bounced.ny * kick * kickScale);
-        vy = roundStep(vy - bounced.nx * kick * kickScale);
-        if (hits >= 4 && vy < 0) vy = roundStep(vy * 0.45);
-        vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY);
+        vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY, gap);
       }
       if (walls.left.virtual) {
         var leftHit = reflectPlane(x, y, vx, vy, walls.left.x, 1, gap, restitution);
@@ -676,7 +700,7 @@
           vy = leftHit.vy;
           if (leftHit.reflected) {
             hits += 1;
-            vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY);
+            vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY, gap);
           }
         }
       }
@@ -689,7 +713,7 @@
           vy = rightHit.vy;
           if (rightHit.reflected) {
             hits += 1;
-            vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY);
+            vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY, gap);
           }
         }
       }
@@ -706,10 +730,11 @@
       if (nearlyStill && !stalled && step > 30) {
         var gateMid = (handoff.x0 + handoff.x1) / 2;
         vx = roundStep(vx + (gateMid >= x ? 1 : -1) * speed * 0.5);
-        vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY);
+        vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY, gap);
         stalled = true;
       }
       if (!nearlyStill) stalled = false;
+      if (hits >= 3 && vy < 0) vy = roundStep(vy * 0.97);
       points.push({ x: roundStep(x), y: roundStep(y) });
       if (y > walls.exitY && x > handoff.x0 && x < handoff.x1) {
         return {
