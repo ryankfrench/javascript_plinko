@@ -142,6 +142,27 @@
     return durations;
   }
 
+  // Guided Physics spends time in proportion to how many steps a channel took.
+  // The last two segments stay the long, slow ones.
+  function playbackDurations(totalMs, hops) {
+    var weights = [];
+    var i;
+    for (i = 0; i < hops.length; i++) {
+      var count = hops[i].points ? hops[i].points.length : 1;
+      weights.push(Math.max(12, count));
+    }
+    var n = weights.length;
+    if (n >= 2) {
+      weights[n - 2] *= 1.7;
+      weights[n - 1] *= 2.2;
+    }
+    var sum = 0;
+    for (i = 0; i < n; i++) sum += weights[i];
+    var out = [];
+    for (i = 0; i < n; i++) out.push((totalMs * weights[i]) / sum);
+    return out;
+  }
+
   function storageKey(responseId, round) {
     return "plinko:" + String(responseId) + ":round:" + String(round);
   }
@@ -421,24 +442,6 @@
     return (-vy + Math.sqrt(disc)) / g;
   }
 
-  function separateFromPeg(x, y, vx, vy, peg, gap) {
-    var dx = x - peg.x;
-    var dy = y - peg.y;
-    var dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist >= gap || dist === 0) return null;
-    var nx = dx / dist;
-    var ny = dy / dist;
-    var pen = gap - dist;
-    x = roundStep(x + nx * pen);
-    y = roundStep(y + ny * pen);
-    var vn = vx * nx + vy * ny;
-    if (vn < 0) {
-      vx = roundStep(vx - vn * nx);
-      vy = roundStep(vy - vn * ny);
-    }
-    return { x: x, y: y, vx: vx, vy: vy };
-  }
-
   function simulateFall(from, endPoint) {
     var g = 2.4;
     var dt = 1 / 180;
@@ -469,57 +472,290 @@
     return { hit: false, points: points };
   }
 
-  function simulateHop(from, peg, endPoint, gap) {
+  function reflectDisk(x, y, vx, vy, peg, gap, restitution) {
+    var dx = x - peg.x;
+    var dy = y - peg.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    if (!(dist < gap) || dist === 0) return null;
+    var nx = dx / dist;
+    var ny = dy / dist;
+    var pen = gap - dist;
+    x = roundStep(x + nx * pen);
+    y = roundStep(y + ny * pen);
+    var vn = vx * nx + vy * ny;
+    if (vn >= 0) return { x: x, y: y, vx: vx, vy: vy, nx: nx, ny: ny, reflected: false };
+    var bounce = 1 + restitution;
+    return {
+      x: x,
+      y: y,
+      vx: roundStep(vx - bounce * vn * nx),
+      vy: roundStep(vy - bounce * vn * ny),
+      nx: nx,
+      ny: ny,
+      reflected: true
+    };
+  }
+
+  function reflectPlane(x, y, vx, vy, planeX, normalSign, gap, restitution) {
+    var signed = (x - planeX) * normalSign;
+    if (signed >= gap) return null;
+    x = roundStep(x + normalSign * (gap - signed));
+    var vn = vx * normalSign;
+    if (vn >= 0) return { x: x, y: y, vx: vx, vy: vy, reflected: false };
+    return {
+      x: x,
+      y: y,
+      vx: roundStep(vx - (1 + restitution) * vn * normalSign),
+      vy: vy,
+      reflected: true
+    };
+  }
+
+  function wallsForStep(row, rightsBefore, dir) {
+    var peg = logicalPeg(row, rightsBefore);
+    var neighborIndex = rightsBefore + dir;
+    var neighbor = null;
+    if (neighborIndex >= 0 && neighborIndex <= row) neighbor = logicalPeg(row, neighborIndex);
+    var left;
+    var right;
+    if (dir === 1) {
+      left = { x: peg.x, y: peg.y, virtual: false };
+      right = neighbor
+        ? { x: neighbor.x, y: neighbor.y, virtual: false }
+        : { x: roundStep(peg.x + 1), y: peg.y, virtual: true };
+    } else {
+      right = { x: peg.x, y: peg.y, virtual: false };
+      left = neighbor
+        ? { x: neighbor.x, y: neighbor.y, virtual: false }
+        : { x: roundStep(peg.x - 1), y: peg.y, virtual: true };
+    }
+    return { left: left, right: right, exitY: left.y };
+  }
+
+  function maxSafeSpeed(x, y, vy, targetX, targetY) {
     var g = 2.4;
-    var dt = 1 / 180;
-    var dy = Math.max(endPoint.y - from.y, 0.02);
-    var flight = fallTime(dy, 0.28, g);
+    var dx = targetX - x;
+    var dy = targetY - y;
+    var adx = Math.abs(dx);
+    if (!(adx > 0.001)) return 0;
+    if (!(dy > 0.02)) return 0.4;
+    var disc = vy * adx * (vy * adx) + 2 * g * dy * adx * adx;
+    var speed = (vy * adx + Math.sqrt(Math.max(0, disc))) / (2 * dy);
+    if (speed > 2.4) speed = 2.4;
+    if (!(speed > 0)) speed = 0;
+    return speed;
+  }
+
+  function capHorizontal(x, y, vx, vy, leftX, rightX, targetY) {
+    var targetX = vx >= 0 ? rightX : leftX;
+    var safe = maxSafeSpeed(x, y, vy, targetX, targetY) * 0.96;
+    if (Math.abs(vx) > safe) vx = (vx >= 0 ? 1 : -1) * safe;
+    return roundStep(vx);
+  }
+
+  function brakeHorizontal(x, y, vx, vy, leftX, rightX, targetY) {
+    var targetX = vx >= 0 ? rightX : leftX;
+    var safe = maxSafeSpeed(x, y, vy, targetX, targetY) * 0.96;
+    var speed = Math.abs(vx);
+    if (speed > safe) {
+      speed -= 3.2 / 180;
+      if (speed < safe) speed = safe;
+      vx = (vx >= 0 ? 1 : -1) * speed;
+    }
+    return roundStep(vx);
+  }
+
+  function brakeLanding(x, y, vx, vy, x0, x1, targetY) {
+    var g = 2.4;
+    var width = x1 - x0;
+    var pad = width > 0.08 ? 0.02 : 0;
+    var gate0 = x0 + pad;
+    var gate1 = x1 - pad;
+    var dy = targetY - y;
+    if (dy <= 0) {
+      if (x >= gate1 && vx > 0) return roundStep(-Math.abs(vx) * 0.5);
+      if (x <= gate0 && vx < 0) return roundStep(Math.abs(vx) * 0.5);
+      return vx;
+    }
+    var disc = vy * vy + 2 * g * dy;
+    var t = (-vy + Math.sqrt(Math.max(0, disc))) / g;
+    if (!(t > 0.001)) return vx;
+    var land = x + vx * t;
+    if (land > gate1 && vx > (gate1 - x) / t) vx = (gate1 - x) / t;
+    if (land < gate0 && vx < (gate0 - x) / t) vx = (gate0 - x) / t;
+    return roundStep(vx);
+  }
+
+  function pinsNear(row) {
+    var pins = [];
+    var r0 = row - 2;
+    if (r0 < 0) r0 = 0;
+    var r;
+    var p;
+    for (r = r0; r <= row; r++) {
+      for (p = 0; p <= r; p++) pins.push(logicalPeg(r, p));
+    }
+    return pins;
+  }
+
+  function simulateChannel(from, walls, handoff, env) {
+    var gap = env.gap;
+    var rng = mulberry32((env.seed + env.row * 0x9e3779b9 + 17) >>> 0);
+    var restitution = 0.58 + rng() * 0.14;
     var x = from.x;
     var y = from.y;
-    var vx = flight > 0 ? (endPoint.x - from.x) / flight : 0;
-    var vy = 0.28;
-    var points = [{ x: x, y: y }];
-    var hit = false;
+    var vx = from.vx;
+    var vy = from.vy;
+    var kick = (rng() - 0.5) * 0.1;
+    if (vy === undefined) vy = 0.08 + rng() * 0.14;
+    if (!env.preserveVelocity) {
+      var goRight = rng() < 0.5;
+      var targetX = goRight ? walls.right.x : walls.left.x;
+      var sign = targetX >= x ? 1 : -1;
+      var safe = maxSafeSpeed(x, y, vy, targetX, walls.exitY);
+      vx = sign * safe * (0.78 + rng() * 0.16);
+    }
+    vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY);
+    var points = [{ x: roundStep(x), y: roundStep(y) }];
+    var hits = 0;
+    var overheadHits = 0;
+    var overhead = null;
+    var g = 2.4;
+    var dt = 1 / 180;
+    var pins = pinsNear(env.row);
+    var stalled = false;
     var step;
-    for (step = 0; step < 500; step++) {
-      var remain = endPoint.y - y;
-      var predT = fallTime(Math.max(remain, 0.01), Math.max(vy, 0.05), g);
-      var err = endPoint.x - (x + vx * predT);
-      var ax = err * 1.6;
-      if (ax > 1.35) ax = 1.35;
-      if (ax < -1.35) ax = -1.35;
-      vx = roundStep(vx + ax * dt);
+    for (step = 0; step < 900; step++) {
+      vx = brakeHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY);
+      if (y > walls.exitY - 0.08 && vy > 0) {
+        vx = brakeLanding(x, y, vx, vy, handoff.x0, handoff.x1, walls.exitY);
+      }
       vy = roundStep(vy + g * dt);
       x = roundStep(x + vx * dt);
       y = roundStep(y + vy * dt);
-      var r;
-      for (r = 0; r < ROWS; r++) {
-        var count = r + 1;
-        var p;
-        for (p = 0; p < count; p++) {
-          var other = logicalPeg(r, p);
-          if (other.x === peg.x && other.y === peg.y) continue;
-          var pushed = separateFromPeg(x, y, vx, vy, other, gap);
-          if (pushed) {
-            x = pushed.x;
-            y = pushed.y;
-            vx = pushed.vx;
-            vy = pushed.vy;
+      var guard = 0;
+      while (guard < 4) {
+        guard += 1;
+        var best = null;
+        var bi;
+        for (bi = 0; bi < pins.length; bi++) {
+          var peg = pins[bi];
+          var dx = x - peg.x;
+          var dy = y - peg.y;
+          var dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < gap && (best === null || dist < best.dist)) best = { peg: peg, dist: dist };
+        }
+        if (!best) break;
+        var incoming = Math.sqrt(vx * vx + vy * vy);
+        var bounced = reflectDisk(x, y, vx, vy, best.peg, gap, restitution);
+        if (!bounced) break;
+        x = bounced.x;
+        y = bounced.y;
+        vx = bounced.vx;
+        vy = bounced.vy;
+        if (!bounced.reflected) break;
+        hits += 1;
+        if (best.peg.y < walls.exitY - 0.2) {
+          overheadHits += 1;
+          if (!overhead) {
+            overhead = { nx: bounced.nx, ny: bounced.ny, vx: bounced.vx, vy: bounced.vy };
+          }
+        }
+        var kickScale = incoming < 1 ? incoming : 1;
+        vx = roundStep(vx + bounced.ny * kick * kickScale);
+        vy = roundStep(vy - bounced.nx * kick * kickScale);
+        if (hits >= 4 && vy < 0) vy = roundStep(vy * 0.45);
+        vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY);
+      }
+      if (walls.left.virtual) {
+        var leftHit = reflectPlane(x, y, vx, vy, walls.left.x, 1, gap, restitution);
+        if (leftHit) {
+          x = leftHit.x;
+          y = leftHit.y;
+          vx = leftHit.vx;
+          vy = leftHit.vy;
+          if (leftHit.reflected) {
+            hits += 1;
+            vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY);
           }
         }
       }
-      var dx = x - peg.x;
-      var dyPeg = y - peg.y;
-      var dist = Math.sqrt(dx * dx + dyPeg * dyPeg);
-      if (dist <= gap + 0.02 && y >= peg.y - gap) {
-        hit = true;
-        points.push({ x: endPoint.x, y: endPoint.y, bin: endPoint.bin });
-        break;
+      if (walls.right.virtual) {
+        var rightHit = reflectPlane(x, y, vx, vy, walls.right.x, -1, gap, restitution);
+        if (rightHit) {
+          x = rightHit.x;
+          y = rightHit.y;
+          vx = rightHit.vx;
+          vy = rightHit.vy;
+          if (rightHit.reflected) {
+            hits += 1;
+            vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY);
+          }
+        }
       }
-      if (y > peg.y + gap + 0.05) break;
-      points.push({ x: x, y: y });
+      if (x <= walls.left.x) {
+        x = roundStep(walls.left.x + 0.004);
+        if (vx < 0) vx = roundStep(-vx * restitution);
+      }
+      if (x >= walls.right.x) {
+        x = roundStep(walls.right.x - 0.004);
+        if (vx > 0) vx = roundStep(-vx * restitution);
+      }
+      var speed = Math.sqrt(vx * vx + vy * vy);
+      var nearlyStill = y < walls.exitY - 0.1 && Math.abs(vx) < 0.18 && vy < 0.25;
+      if (nearlyStill && !stalled && step > 30) {
+        var gateMid = (handoff.x0 + handoff.x1) / 2;
+        vx = roundStep(vx + (gateMid >= x ? 1 : -1) * speed * 0.5);
+        vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY);
+        stalled = true;
+      }
+      if (!nearlyStill) stalled = false;
+      points.push({ x: roundStep(x), y: roundStep(y) });
+      if (y > walls.exitY && x > handoff.x0 && x < handoff.x1) {
+        return {
+          hit: true,
+          points: points,
+          hits: hits,
+          overheadHits: overheadHits,
+          overhead: overhead,
+          x: x,
+          y: y,
+          vx: vx,
+          vy: vy
+        };
+      }
     }
-    return { hit: hit, points: points };
+    return {
+      hit: false,
+      points: points,
+      hits: hits,
+      overheadHits: overheadHits,
+      overhead: overhead,
+      x: x,
+      y: y,
+      vx: vx,
+      vy: vy
+    };
+  }
+
+  function channelHandoff(walls, row, nextRights, path, bin) {
+    var x0 = walls.left.x;
+    var x1 = walls.right.x;
+    if (row + 1 < ROWS) {
+      var nextDir = path.charAt(row + 1) === "R" ? 1 : -1;
+      var nextWalls = wallsForStep(row + 1, nextRights, nextDir);
+      if (nextWalls.left.x > x0) x0 = nextWalls.left.x;
+      if (nextWalls.right.x < x1) x1 = nextWalls.right.x;
+    } else {
+      var center = bin - 4;
+      if (center - 0.5 > x0) x0 = center - 0.5;
+      if (center + 0.5 < x1) x1 = center + 0.5;
+    }
+    if (!(x0 < x1)) {
+      x0 = walls.left.x + 0.02;
+      x1 = walls.right.x - 0.02;
+    }
+    return { x0: x0, x1: x1 };
   }
 
   function guidedRoute(path, seed, diskRadius, pegRadius) {
@@ -545,24 +781,64 @@
     var layout = contactsFor(path, seed >>> 0, disk.gap);
     var hops = [];
     var fallback = false;
-    for (var i = 0; i < layout.pegs.length; i++) {
-      var peg = logicalPeg(layout.pegs[i].row, layout.pegs[i].index);
-      var sim = simulateHop(layout.points[i], peg, layout.points[i + 1], disk.gap);
+    var pos = layout.points[0];
+    var vel = { vy: undefined };
+    var rights = 0;
+    var row;
+    for (row = 0; row < layout.pegs.length; row++) {
+      var dir = path.charAt(row) === "R" ? 1 : -1;
+      var walls = wallsForStep(row, rights, dir);
+      var nextRights = rights + (dir === 1 ? 1 : 0);
+      var handoff = channelHandoff(walls, row, nextRights, path, layout.bin);
+      var sim = simulateChannel(
+        { x: pos.x, y: pos.y, vx: vel.vx, vy: vel.vy },
+        walls,
+        handoff,
+        { seed: seed >>> 0, row: row, gap: disk.gap }
+      );
       if (!sim.hit) {
         fallback = true;
-        hops.push({ points: sampleGuidedHop(layout.points[i], layout.points[i + 1]), fallback: true });
+        var guidedTo = {
+          x: (handoff.x0 + handoff.x1) / 2,
+          y: roundStep(walls.exitY + 0.02)
+        };
+        var guided = sampleGuidedHop(pos, guidedTo);
+        hops.push({
+          points: guided,
+          fallback: true,
+          hits: 0,
+          overheadHits: 0,
+          left: walls.left.x,
+          right: walls.right.x,
+          exitY: walls.exitY,
+          interior: !walls.left.virtual && !walls.right.virtual
+        });
+        pos = guided[guided.length - 1];
+        vel = { vx: undefined, vy: undefined };
       } else {
-        hops.push({ points: sim.points, fallback: false });
+        hops.push({
+          points: sim.points,
+          fallback: false,
+          hits: sim.hits,
+          overheadHits: sim.overheadHits,
+          overhead: sim.overhead,
+          left: walls.left.x,
+          right: walls.right.x,
+          exitY: walls.exitY,
+          interior: !walls.left.virtual && !walls.right.virtual
+        });
+        pos = sim.points[sim.points.length - 1];
+        vel = { vx: sim.vx, vy: sim.vy };
       }
+      rights = nextRights;
     }
-    var lastFrom = layout.points[layout.points.length - 2];
     var lastTo = layout.points[layout.points.length - 1];
-    var intoBin = simulateFall(lastFrom, lastTo);
+    var intoBin = simulateFall(pos, lastTo);
     if (!intoBin.hit) {
       fallback = true;
-      hops.push({ points: sampleGuidedHop(lastFrom, lastTo), fallback: true });
+      hops.push({ points: sampleGuidedHop(pos, lastTo), fallback: true, hits: 0 });
     } else {
-      hops.push({ points: intoBin.points, fallback: false });
+      hops.push({ points: intoBin.points, fallback: false, hits: 0 });
     }
     return {
       animation: "guided-physics",
@@ -811,7 +1087,10 @@
 
     function runDrop(settledRecord) {
       app.setAttribute("data-state", "dropping");
-      var durations = segmentDurations(options.dropDurationMs);
+      var durations =
+        route && route.animation === "guided-physics"
+          ? playbackDurations(options.dropDurationMs, route.hops)
+          : segmentDurations(options.dropDurationMs);
       var total = 0;
       for (var i = 0; i < durations.length; i++) total += durations[i];
       var startedAt = null;
@@ -948,6 +1227,9 @@
     diskSpec: diskSpec,
     guidedRoute: guidedRoute,
     simulatePhysics: simulatePhysics,
+    simulateChannel: simulateChannel,
+    wallsForStep: wallsForStep,
+    reflectDisk: reflectDisk,
     hopPoint: hopPoint,
     mount: mount
   };
