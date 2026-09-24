@@ -438,6 +438,16 @@
     return points;
   }
 
+  function sampleFirstDrop(from, to, gap) {
+    var crown = { x: 0, y: -gap };
+    var points = [];
+    var steps = 8;
+    var i;
+    for (i = 0; i < steps; i++) points.push(hopPoint(from, crown, i / steps));
+    for (i = 0; i <= steps; i++) points.push(hopPoint(crown, to, i / steps));
+    return points;
+  }
+
   function fallTime(dy, vy, g) {
     if (dy <= 0.0001) return 0.04;
     var disc = vy * vy + 2 * g * dy;
@@ -645,12 +655,18 @@
     var vx = from.vx;
     var vy = from.vy;
     if (vx === undefined || vy === undefined) {
-      var goRight = rng() < 0.5;
-      var targetX = goRight ? walls.right.x : walls.left.x;
-      var sign = targetX >= x ? 1 : -1;
       if (vy === undefined) vy = 0.08 + rng() * 0.14;
-      var safe = maxSafeSpeed(x, y, vy, targetX, walls.exitY);
-      vx = sign * safe * (0.78 + rng() * 0.16);
+      if (env.row === 0) {
+        var into = (walls.left.x + walls.right.x) / 2 >= x ? 1 : -1;
+        var tCrown = fallTime(Math.max(-gap - y, 0.05), vy, 2.4);
+        vx = into * (gap * 0.25) / Math.max(tCrown, 0.02);
+      } else {
+        var goRight = rng() < 0.5;
+        var targetX = goRight ? walls.right.x : walls.left.x;
+        var sign = targetX >= x ? 1 : -1;
+        var safe = maxSafeSpeed(x, y, vy, targetX, walls.exitY);
+        vx = sign * safe * (0.78 + rng() * 0.16);
+      }
     }
     vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY, gap);
     var points = [{ x: roundStep(x), y: roundStep(y) }];
@@ -801,7 +817,10 @@
     var layout = contactsFor(path, seed >>> 0, disk.gap);
     var hops = [];
     for (var i = 0; i < layout.points.length - 1; i++) {
-      hops.push({ points: sampleGuidedHop(layout.points[i], layout.points[i + 1]), fallback: false });
+      var hopPoints = i === 0
+        ? sampleFirstDrop(layout.points[0], layout.points[1], disk.gap)
+        : sampleGuidedHop(layout.points[i], layout.points[i + 1]);
+      hops.push({ points: hopPoints, fallback: false });
     }
     return {
       animation: "guided",
