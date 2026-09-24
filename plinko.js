@@ -142,24 +142,20 @@
     return durations;
   }
 
-  // Guided Physics spends time in proportion to how many steps a channel took.
-  // The last two segments stay the long, slow ones.
+  // An X-Large drop averages about this many samples. That fall fills the
+  // selected duration. Fewer samples finish sooner, in the same proportion.
+  var PHYSICS_REFERENCE_SAMPLES = 2200;
+
+  // Each sample takes the same time. The slide into the middle of the bin is
+  // only as long as the simulation spent there.
   function playbackDurations(totalMs, hops) {
-    var weights = [];
+    var msPerSample = totalMs / PHYSICS_REFERENCE_SAMPLES;
+    var out = [];
     var i;
     for (i = 0; i < hops.length; i++) {
       var count = hops[i].points ? hops[i].points.length : 1;
-      weights.push(Math.max(12, count));
+      out.push(Math.max(1, count) * msPerSample);
     }
-    var n = weights.length;
-    if (n >= 2) {
-      weights[n - 2] *= 1.7;
-      weights[n - 1] *= 2.2;
-    }
-    var sum = 0;
-    for (i = 0; i < n; i++) sum += weights[i];
-    var out = [];
-    for (i = 0; i < n; i++) out.push((totalMs * weights[i]) / sum);
     return out;
   }
 
@@ -1166,7 +1162,12 @@
         }
         if (localT < 0) localT = 0;
         if (localT > 1) localT = 1;
-        var eased = idx >= durations.length - 2 ? easeOutCubic(localT) : localT;
+        var eased =
+          route.animation === "guided-physics"
+            ? localT
+            : idx >= durations.length - 2
+              ? easeOutCubic(localT)
+              : localT;
         var logical = pointOnHop(route.hops[idx], eased);
         var canvasPoint = logicalToCanvas(logical, surface.geo);
         view.path = settledRecord.path;
@@ -1212,6 +1213,13 @@
       record = createRecord(options, decision, trial);
       route = routeFor(trial.path, trial.seed, options.animation, options.diskRadius, options.pegRadius);
       record.physics_fallback = route.fallback;
+      if (route.animation === "guided-physics") {
+        var played = playbackDurations(options.dropDurationMs, route.hops);
+        var playedMs = 0;
+        var pi;
+        for (pi = 0; pi < played.length; pi++) playedMs += played[pi];
+        record.drop_duration_ms = Math.round(playedMs);
+      }
       writeStored(key, record);
       beginTimedTrial(record);
     }
