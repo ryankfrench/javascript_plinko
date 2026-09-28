@@ -95,6 +95,21 @@
       var params = new URLSearchParams(window.location.search);
       var fast = params.get("fast") === "1";
       if (params.get("seed")) document.getElementById("seed").value = params.get("seed");
+
+      function applyChoice(id, raw) {
+        if (!raw) return;
+        var select = document.getElementById(id);
+        for (var i = 0; i < select.options.length; i++) {
+          if (select.options[i].value === raw) {
+            select.value = raw;
+            return;
+          }
+        }
+      }
+
+      applyChoice("motion", params.get("motion"));
+      applyChoice("disk", params.get("disk"));
+      applyChoice("peg", params.get("pins"));
       var round = 1;
       var logs = [];
       var handle = null;

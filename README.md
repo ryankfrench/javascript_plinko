@@ -84,7 +84,13 @@ Timestamps are the machine clock FaceReader has to be aligned to. This task does
 
 ## Pilot page
 
-Open [index.html](index.html) on a local web server. It runs both rounds, shows the JSON, and can switch the drop among 8, 10, and 12 seconds. The Motion control chooses guided arcs or Guided Physics. Reset clears the saved pilot trials. Add `?fast=1` to shorten the dwells while checking the flow. Do not use this page with participants.
+Open [index.html](index.html) on a local web server. It runs both rounds, shows the JSON, and can switch the drop among 8, 10, and 12 seconds. The Motion control chooses guided arcs or Guided Physics. Reset clears the saved pilot trials. Add `?fast=1` to shorten the dwells while checking the flow. `motion`, `disk`, and `pins` set those controls before the first round. A value that is not one of the menu choices is ignored.
+
+```
+?motion=guided-physics&disk=0.34&pins=0.09
+```
+
+`motion` is `guided` or `guided-physics`. `disk` is `0.12`, `0.2`, `0.26`, or `0.34`. `pins` is `0.066` or `0.09`. Do not use this page with participants.
 
 ```bash
 python3 -m http.server 8765
