@@ -146,8 +146,8 @@
   // selected duration. Fewer samples finish sooner, in the same proportion.
   var PHYSICS_REFERENCE_SAMPLES = 2200;
 
-  // Each sample takes the same time. The slide into the middle of the bin is
-  // only as long as the simulation spent there.
+  // Each sample takes the same time. The fall into the bin is only as long
+  // as the simulation spent there.
   function playbackDurations(totalMs, hops) {
     var msPerSample = totalMs / PHYSICS_REFERENCE_SAMPLES;
     var out = [];
@@ -337,9 +337,8 @@
     var need = diskRadiusPx + 8;
     var pegTop = Math.ceil(need + (-startY / LOGICAL_ROW) * rowGap);
     var pegBottom = pegTop + (ROWS - 1) * rowGap;
-    var below = Math.max(26, Math.ceil(diskRadiusPx + 12));
-    var binH = Math.max(52, Math.round(width * 0.07));
-    var binTop = pegBottom + below;
+    var binH = binHeightPx(spacing, disk.diskRadius);
+    var binTop = pegBottom + BIN_MOUTH * spacing;
     var height = Math.ceil(binTop + binH + 10);
     return {
       width: width,
@@ -356,7 +355,7 @@
       diskRadiusPx: diskRadiusPx,
       pegRadiusPx: pegRadiusPx,
       yStart: 16,
-      binBallY: binTop - diskRadiusPx - 6
+      binBallY: pegBottom + binCenterDrop(spacing, disk.diskRadius) * spacing
     };
   }
 
@@ -370,6 +369,10 @@
   var LOGICAL_ROW = Math.sqrt(3) / 2;
   var DEFAULT_DISK_RADIUS = 0.2;
   var DEFAULT_PEG_RADIUS = 5 / 76;
+  // The wall foot, and the top of every bin, sit this far below the last pin row.
+  var BIN_MOUTH = 0.65;
+  var BIN_PAD_PX = 8;
+  var BIN_MIN_H = 36;
 
   function diskSpec(diskRadius, pegRadius) {
     var disk = typeof diskRadius === "number" && diskRadius > 0 ? diskRadius : DEFAULT_DISK_RADIUS;
@@ -388,14 +391,29 @@
     };
   }
 
-  function logicalBin(bin) {
-    return { x: bin - 4, y: 7 * LOGICAL_ROW + 0.17, bin: true };
+  function binHeightPx(spacing, diskRadius) {
+    return Math.max(Math.ceil(spacing * diskRadius * 2 + BIN_PAD_PX), BIN_MIN_H);
+  }
+
+  // Pin-spacings from the last pin row down to the disk center inside the bin.
+  function binCenterDrop(spacing, diskRadius) {
+    if (!(spacing > 0)) return BIN_MOUTH + diskRadius;
+    return BIN_MOUTH + binHeightPx(spacing, diskRadius) / (2 * spacing);
+  }
+
+  function logicalBin(bin, diskRadius, spacing) {
+    var radius = typeof diskRadius === "number" && diskRadius > 0 ? diskRadius : DEFAULT_DISK_RADIUS;
+    return {
+      x: bin - 4,
+      y: (ROWS - 1) * LOGICAL_ROW + binCenterDrop(spacing, radius),
+      bin: true
+    };
   }
 
   function boardWalls() {
     var mouthTop = -1.2;
     var slantBottom = (ROWS - 1) * LOGICAL_ROW;
-    var binLip = slantBottom + 0.65;
+    var binLip = slantBottom + BIN_MOUTH;
     // The slant is 30 degrees from vertical. A horizontal offset of 2/√3 puts the
     // stroke one full pin-spacing away from each outside pin, measured perpendicular
     // to the wall — the same spacing as two pins in the same row.
@@ -433,7 +451,7 @@
     return { x: 0, y: y };
   }
 
-  function contactsFor(path, seed, gap) {
+  function contactsFor(path, seed, gap, diskRadius, spacing) {
     var points = [logicalStart(gap)];
     var pegs = [];
     var rights = 0;
@@ -444,7 +462,7 @@
       pegs.push({ row: r, index: rights, dir: dir });
       if (dir === 1) rights += 1;
     }
-    points.push(logicalBin(rights));
+    points.push(logicalBin(rights, diskRadius, spacing));
     return { points: points, pegs: pegs, bin: rights };
   }
 
@@ -902,9 +920,9 @@
     return { x0: x0, x1: x1 };
   }
 
-  function guidedRoute(path, seed, diskRadius, pegRadius) {
+  function guidedRoute(path, seed, diskRadius, pegRadius, spacing) {
     var disk = diskSpec(diskRadius, pegRadius);
-    var layout = contactsFor(path, seed >>> 0, disk.gap);
+    var layout = contactsFor(path, seed >>> 0, disk.gap, disk.diskRadius, spacing);
     var hops = [];
     for (var i = 0; i < layout.points.length - 1; i++) {
       var hopPoints = i === 0
@@ -923,9 +941,9 @@
     };
   }
 
-  function simulatePhysics(path, seed, diskRadius, pegRadius) {
+  function simulatePhysics(path, seed, diskRadius, pegRadius, spacing) {
     var disk = diskSpec(diskRadius, pegRadius);
-    var layout = contactsFor(path, seed >>> 0, disk.gap);
+    var layout = contactsFor(path, seed >>> 0, disk.gap, disk.diskRadius, spacing);
     var hops = [];
     var fallback = false;
     var pos = layout.points[0];
@@ -998,15 +1016,15 @@
     };
   }
 
-  function routeFor(path, seed, animation, diskRadius, pegRadius) {
-    if (animation === "guided-physics") return simulatePhysics(path, seed, diskRadius, pegRadius);
-    return guidedRoute(path, seed, diskRadius, pegRadius);
+  function routeFor(path, seed, animation, diskRadius, pegRadius, spacing) {
+    if (animation === "guided-physics") return simulatePhysics(path, seed, diskRadius, pegRadius, spacing);
+    return guidedRoute(path, seed, diskRadius, pegRadius, spacing);
   }
 
   function logicalToCanvas(point, geo) {
     return {
       x: geo.centerX + point.x * geo.spacing,
-      y: point.bin ? geo.binBallY : geo.pegTop + (point.y / LOGICAL_ROW) * geo.rowGap
+      y: geo.pegTop + (point.y / LOGICAL_ROW) * geo.rowGap
     };
   }
 
@@ -1044,21 +1062,8 @@
   function drawBoard(ctx, geo, view) {
     ctx.clearRect(0, 0, geo.width, geo.height);
 
-    var i;
-    for (i = 0; i < PAYOUTS.length; i++) {
-      var x = geo.padX + i * (geo.binWidth + geo.gap);
-      var landed = view.highlight === i;
-      ctx.fillStyle = landed ? "#1c2430" : i % 2 === 0 ? "#f3efe6" : "#e4ded2";
-      ctx.fillRect(x, geo.binTop, geo.binWidth, geo.binH);
-      ctx.fillStyle = landed ? "#fbfaf7" : "#1c2430";
-      var labelSize = Math.max(11, Math.min(16, geo.binWidth * 0.3));
-      ctx.font = "bold " + labelSize + "px Segoe UI, Helvetica, Arial, sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(formatMoney(PAYOUTS[i]), x + geo.binWidth / 2, geo.binTop + geo.binH / 2);
-    }
-
     var walls = wallPoints(geo);
+    var i;
     ctx.strokeStyle = "#5e6a72";
     ctx.lineWidth = geo.pegRadiusPx * 2;
     ctx.lineCap = "round";
@@ -1088,6 +1093,25 @@
       ctx.lineWidth = 2;
       ctx.strokeStyle = "#7c2d12";
       ctx.stroke();
+    }
+
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    for (i = 0; i < PAYOUTS.length; i++) {
+      var x = geo.padX + i * (geo.binWidth + geo.gap);
+      ctx.fillStyle = i % 2 === 0 ? "#f3efe6" : "#e4ded2";
+      ctx.fillRect(x, geo.binTop, geo.binWidth, geo.binH);
+    }
+    ctx.restore();
+
+    var labelSize = Math.max(14, Math.min(20, geo.binWidth * 0.38));
+    ctx.font = "bold " + labelSize + "px Segoe UI, Helvetica, Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#1c2430";
+    for (i = 0; i < PAYOUTS.length; i++) {
+      var labelX = geo.padX + i * (geo.binWidth + geo.gap);
+      ctx.fillText(formatMoney(PAYOUTS[i]), labelX + geo.binWidth / 2, geo.binTop + geo.binH / 2);
     }
   }
 
@@ -1200,7 +1224,7 @@
       var surface = ctx2d();
       var geo = surface.geo;
       if (view.path && view.ball && view.ball.settled && view.highlight !== null) {
-        var rested = logicalToCanvas(logicalBin(view.highlight), geo);
+        var rested = logicalToCanvas(logicalBin(view.highlight, options.diskRadius, geo.spacing), geo);
         view.ball = { x: rested.x, y: rested.y, settled: true };
       } else if (!view.ball || !view.path) {
         var rest = logicalToCanvas(logicalStart(options.diskRadius + options.pegRadius), geo);
@@ -1330,7 +1354,15 @@
       var seed = typeof options.seed === "function" ? options.seed() : options.seed;
       var trial = drawTrial(seed);
       record = createRecord(options, decision, trial);
-      route = routeFor(trial.path, trial.seed, options.animation, options.diskRadius, options.pegRadius);
+      var dropGeo = ctx2d().geo;
+      route = routeFor(
+        trial.path,
+        trial.seed,
+        options.animation,
+        options.diskRadius,
+        options.pegRadius,
+        dropGeo.spacing
+      );
       record.physics_fallback = route.fallback;
       if (route.animation === "guided-physics") {
         var played = playbackDurations(options.dropDurationMs, route.hops);
