@@ -15,7 +15,14 @@
     .pilot-note { margin: 0 0 8px; color: #5c4a32; }
     .pilot-controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     label { font-size: 0.95rem; }
-    select, button { font: inherit; }
+    select, button, input { font: inherit; }
+    #seed {
+      width: 8.5rem;
+      border: 1px solid #1c2430;
+      background: #fff;
+      border-radius: 6px;
+      padding: 6px 8px;
+    }
     #reset {
       border: 1px solid #1c2430;
       background: #fff;
@@ -73,6 +80,10 @@
           <option value="0.09">Medium</option>
         </select>
       </label>
+      <label>
+        Seed
+        <input id="seed" type="text" inputmode="numeric" placeholder="random" autocomplete="off">
+      </label>
       <button id="reset" type="button">Reset pilot</button>
     </div>
   </div>
@@ -83,6 +94,7 @@
     (function () {
       var params = new URLSearchParams(window.location.search);
       var fast = params.get("fast") === "1";
+      if (params.get("seed")) document.getElementById("seed").value = params.get("seed");
       var round = 1;
       var logs = [];
       var handle = null;
@@ -110,6 +122,13 @@
           animation: document.getElementById("motion").value,
           diskRadius: Number(document.getElementById("disk").value),
           pegRadius: Number(document.getElementById("peg").value),
+          seed: function () {
+            var raw = document.getElementById("seed").value.trim();
+            if (!raw) return undefined;
+            var n = Number(raw);
+            if (!isFinite(n)) return undefined;
+            return n >>> 0;
+          },
           dropDurationMs: fast ? 1200 : dropDuration(),
           messageDwellMs: fast ? 250 : 4000,
           revealDwellMs: fast ? 250 : 4000,
