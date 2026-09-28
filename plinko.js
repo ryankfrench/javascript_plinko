@@ -142,24 +142,20 @@
     return durations;
   }
 
-  // Guided Physics spends time in proportion to how many steps a channel took.
-  // The last two segments stay the long, slow ones.
+  // An X-Large drop averages about this many samples. That fall fills the
+  // selected duration. Fewer samples finish sooner, in the same proportion.
+  var PHYSICS_REFERENCE_SAMPLES = 2200;
+
+  // Each sample takes the same time. The fall into the bin is only as long
+  // as the simulation spent there.
   function playbackDurations(totalMs, hops) {
-    var weights = [];
+    var msPerSample = totalMs / PHYSICS_REFERENCE_SAMPLES;
+    var out = [];
     var i;
     for (i = 0; i < hops.length; i++) {
       var count = hops[i].points ? hops[i].points.length : 1;
-      weights.push(Math.max(12, count));
+      out.push(Math.max(1, count) * msPerSample);
     }
-    var n = weights.length;
-    if (n >= 2) {
-      weights[n - 2] *= 1.7;
-      weights[n - 1] *= 2.2;
-    }
-    var sum = 0;
-    for (i = 0; i < n; i++) sum += weights[i];
-    var out = [];
-    for (i = 0; i < n; i++) out.push((totalMs * weights[i]) / sum);
     return out;
   }
 
@@ -315,24 +311,35 @@
     document.head.appendChild(style);
   }
 
-  function layoutOf(width, height, disk) {
-    var padX = 18;
+  function layoutOf(width, disk) {
     var gap = 4;
     var binCount = PAYOUTS.length;
-    var binH = Math.max(52, Math.round(height * 0.12));
-    var binTop = height - binH - 10;
+    var margin = 8;
+    var wallFoot = (ROWS - 1) / 2 + 2 / Math.sqrt(3) + disk.pegRadius;
+    var padX = 18;
+    var fit;
+    for (fit = 0; fit < 4; fit++) {
+      var trialInner = width - padX * 2;
+      var trialBin = (trialInner - gap * (binCount - 1)) / binCount;
+      var trialSpacing = trialBin + gap;
+      var wallLeft = padX + ((binCount - 1) / 2) * trialSpacing + trialBin / 2 - wallFoot * trialSpacing;
+      if (wallLeft >= margin) break;
+      padX += margin - wallLeft;
+    }
     var inner = width - padX * 2;
     var binWidth = (inner - gap * (binCount - 1)) / binCount;
     var spacing = binWidth + gap;
     var centerX = padX + 4 * spacing + binWidth / 2;
     var diskRadiusPx = spacing * disk.diskRadius;
     var pegRadiusPx = spacing * disk.pegRadius;
-    var pegBottom = binTop - Math.max(26, Math.ceil(diskRadiusPx + 12));
+    var rowGap = spacing * LOGICAL_ROW;
     var startY = -0.4 - (disk.diskRadius + disk.pegRadius);
-    var above = (-startY / LOGICAL_ROW) / (ROWS - 1);
     var need = diskRadiusPx + 8;
-    var pegTop = Math.ceil((need + above * pegBottom) / (1 + above));
-    var rowGap = (pegBottom - pegTop) / (ROWS - 1);
+    var pegTop = Math.ceil(need + (-startY / LOGICAL_ROW) * rowGap);
+    var pegBottom = pegTop + (ROWS - 1) * rowGap;
+    var binH = binHeightPx(spacing, disk.diskRadius);
+    var binTop = pegBottom + BIN_MOUTH * spacing;
+    var height = Math.ceil(binTop + binH + 10);
     return {
       width: width,
       height: height,
@@ -348,7 +355,7 @@
       diskRadiusPx: diskRadiusPx,
       pegRadiusPx: pegRadiusPx,
       yStart: 16,
-      binBallY: binTop - diskRadiusPx - 6
+      binBallY: pegBottom + binCenterDrop(spacing, disk.diskRadius) * spacing
     };
   }
 
@@ -359,9 +366,13 @@
     };
   }
 
-  var LOGICAL_ROW = 0.58;
+  var LOGICAL_ROW = Math.sqrt(3) / 2;
   var DEFAULT_DISK_RADIUS = 0.2;
   var DEFAULT_PEG_RADIUS = 5 / 76;
+  // The wall foot, and the top of every bin, sit this far below the last pin row.
+  var BIN_MOUTH = 0.65;
+  var BIN_PAD_PX = 8;
+  var BIN_MIN_H = 36;
 
   function diskSpec(diskRadius, pegRadius) {
     var disk = typeof diskRadius === "number" && diskRadius > 0 ? diskRadius : DEFAULT_DISK_RADIUS;
@@ -380,8 +391,44 @@
     };
   }
 
-  function logicalBin(bin) {
-    return { x: bin - 4, y: 7 * LOGICAL_ROW + 0.17, bin: true };
+  function binHeightPx(spacing, diskRadius) {
+    return Math.max(Math.ceil(spacing * diskRadius * 2 + BIN_PAD_PX), BIN_MIN_H);
+  }
+
+  // Pin-spacings from the last pin row down to the disk center inside the bin.
+  function binCenterDrop(spacing, diskRadius) {
+    if (!(spacing > 0)) return BIN_MOUTH + diskRadius;
+    return BIN_MOUTH + binHeightPx(spacing, diskRadius) / (2 * spacing);
+  }
+
+  function logicalBin(bin, diskRadius, spacing) {
+    var radius = typeof diskRadius === "number" && diskRadius > 0 ? diskRadius : DEFAULT_DISK_RADIUS;
+    return {
+      x: bin - 4,
+      y: (ROWS - 1) * LOGICAL_ROW + binCenterDrop(spacing, radius),
+      bin: true
+    };
+  }
+
+  function boardWalls() {
+    var mouthTop = -1.2;
+    var slantBottom = (ROWS - 1) * LOGICAL_ROW;
+    var binLip = slantBottom + BIN_MOUTH;
+    // The slant is 30 degrees from vertical. A horizontal offset of 2/√3 puts the
+    // stroke one full pin-spacing away from each outside pin, measured perpendicular
+    // to the wall — the same spacing as two pins in the same row.
+    var offset = 2 / Math.sqrt(3);
+    function side(sign) {
+      var mouth = sign * offset;
+      var foot = sign * ((ROWS - 1) / 2 + offset);
+      return [
+        { x: mouth, y: mouthTop },
+        { x: mouth, y: 0 },
+        { x: foot, y: slantBottom },
+        { x: foot, y: binLip }
+      ];
+    }
+    return { left: side(-1), right: side(1) };
   }
 
   function exitAngle(seed, row) {
@@ -404,7 +451,7 @@
     return { x: 0, y: y };
   }
 
-  function contactsFor(path, seed, gap) {
+  function contactsFor(path, seed, gap, diskRadius, spacing) {
     var points = [logicalStart(gap)];
     var pegs = [];
     var rights = 0;
@@ -415,7 +462,7 @@
       pegs.push({ row: r, index: rights, dir: dir });
       if (dir === 1) rights += 1;
     }
-    points.push(logicalBin(rights));
+    points.push(logicalBin(rights, diskRadius, spacing));
     return { points: points, pegs: pegs, bin: rights };
   }
 
@@ -437,6 +484,16 @@
     return points;
   }
 
+  function sampleFirstDrop(from, to, gap) {
+    var crown = { x: 0, y: -gap };
+    var points = [];
+    var steps = 8;
+    var i;
+    for (i = 0; i < steps; i++) points.push(hopPoint(from, crown, i / steps));
+    for (i = 0; i <= steps; i++) points.push(hopPoint(crown, to, i / steps));
+    return points;
+  }
+
   function fallTime(dy, vy, g) {
     if (dy <= 0.0001) return 0.04;
     var disc = vy * vy + 2 * g * dy;
@@ -444,7 +501,7 @@
     return (-vy + Math.sqrt(disc)) / g;
   }
 
-  function simulateFall(from, endPoint) {
+  function simulateFall(from, endPoint, gap) {
     var g = 2.4;
     var dt = 1 / 180;
     var x = from.x;
@@ -465,6 +522,11 @@
       vy = roundStep(vy + g * dt);
       x = roundStep(x + vx * dt);
       y = roundStep(y + vy * dt);
+      var landed = resolveWalls(x, y, vx, vy, gap, 0.65);
+      x = landed.x;
+      y = landed.y;
+      vx = landed.vx;
+      vy = landed.vy;
       points.push({ x: x, y: y });
       if (y >= endPoint.y) {
         points[points.length - 1] = { x: endPoint.x, y: endPoint.y, bin: true };
@@ -484,9 +546,13 @@
     var pen = gap - dist;
     x = roundStep(x + nx * pen);
     y = roundStep(y + ny * pen);
+    return applyContact(x, y, vx, vy, nx, ny, restitution);
+  }
+
+  function applyContact(x, y, vx, vy, nx, ny, restitution) {
     var vn = vx * nx + vy * ny;
     if (vn >= 0) return { x: x, y: y, vx: vx, vy: vy, nx: nx, ny: ny, reflected: false };
-    // A moving brush sheds the speed aimed into the pin. A harder hit bounces.
+    // A moving brush sheds the speed aimed into the surface. A harder hit bounces.
     if (vn > -0.35) {
       var tx = vx - vn * nx;
       var ty = vy - vn * ny;
@@ -508,19 +574,86 @@
     };
   }
 
-  function reflectPlane(x, y, vx, vy, planeX, normalSign, gap, restitution) {
-    var signed = (x - planeX) * normalSign;
+  function segmentApproach(x, y, a, b, gap) {
+    var abx = b.x - a.x;
+    var aby = b.y - a.y;
+    var len2 = abx * abx + aby * aby;
+    if (!(len2 > 0)) return null;
+    var t = ((x - a.x) * abx + (y - a.y) * aby) / len2;
+    var onSeg = t >= 0 && t <= 1;
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    var cx = a.x + abx * t;
+    var cy = a.y + aby * t;
+    var dx = x - cx;
+    var dy = y - cy;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    var len = Math.sqrt(len2);
+    var ix = -aby / len;
+    var iy = abx / len;
+    if (ix * -cx + iy * -cy < 0) {
+      ix = -ix;
+      iy = -iy;
+    }
+    var side = dx * ix + dy * iy;
+    var nx = ix;
+    var ny = iy;
+    var signed = side;
+    if (!onSeg) {
+      if (!(dist < gap)) return null;
+      if (dist > 0 && side >= 0) {
+        nx = dx / dist;
+        ny = dy / dist;
+        signed = dist;
+      } else {
+        signed = -dist;
+      }
+    }
     if (signed >= gap) return null;
-    x = roundStep(x + normalSign * (gap - signed));
-    var vn = vx * normalSign;
-    if (vn >= 0) return { x: x, y: y, vx: vx, vy: vy, reflected: false };
-    return {
-      x: x,
-      y: y,
-      vx: roundStep(vx - (1 + restitution) * vn * normalSign),
-      vy: vy,
-      reflected: true
-    };
+    return { a: a, b: b, nx: nx, ny: ny, signed: signed };
+  }
+
+  function reflectSegment(x, y, vx, vy, a, b, gap, restitution) {
+    var approach = segmentApproach(x, y, a, b, gap);
+    if (!approach) return null;
+    var pen = gap - approach.signed;
+    x = roundStep(x + approach.nx * pen);
+    y = roundStep(y + approach.ny * pen);
+    return applyContact(x, y, vx, vy, approach.nx, approach.ny, restitution);
+  }
+
+  function deepestWall(x, y, gap) {
+    var outline = boardWalls();
+    var sides = [outline.left, outline.right];
+    var best = null;
+    var s;
+    var i;
+    for (s = 0; s < sides.length; s++) {
+      var pts = sides[s];
+      for (i = 0; i < pts.length - 1; i++) {
+        var approach = segmentApproach(x, y, pts[i], pts[i + 1], gap);
+        if (!approach || !(approach.signed < gap)) continue;
+        if (best === null || approach.signed < best.signed) best = approach;
+      }
+    }
+    return best;
+  }
+
+  function resolveWalls(x, y, vx, vy, gap, restitution) {
+    var guard = 0;
+    while (guard < 4) {
+      guard += 1;
+      var best = deepestWall(x, y, gap);
+      if (!best) break;
+      var hit = reflectSegment(x, y, vx, vy, best.a, best.b, gap, restitution);
+      if (!hit) break;
+      x = hit.x;
+      y = hit.y;
+      vx = hit.vx;
+      vy = hit.vy;
+      if (!hit.reflected) break;
+    }
+    return { x: x, y: y, vx: vx, vy: vy };
   }
 
   function wallsForStep(row, rightsBefore, dir) {
@@ -629,7 +762,9 @@
     if (r0 < 0) r0 = 0;
     var r;
     var p;
-    for (r = r0; r <= row; r++) {
+    var r1 = row + 1;
+    if (r1 > ROWS - 1) r1 = ROWS - 1;
+    for (r = r0; r <= r1; r++) {
       for (p = 0; p <= r; p++) pins.push(logicalPeg(r, p));
     }
     return pins;
@@ -644,12 +779,18 @@
     var vx = from.vx;
     var vy = from.vy;
     if (vx === undefined || vy === undefined) {
-      var goRight = rng() < 0.5;
-      var targetX = goRight ? walls.right.x : walls.left.x;
-      var sign = targetX >= x ? 1 : -1;
       if (vy === undefined) vy = 0.08 + rng() * 0.14;
-      var safe = maxSafeSpeed(x, y, vy, targetX, walls.exitY);
-      vx = sign * safe * (0.78 + rng() * 0.16);
+      if (env.row === 0) {
+        var into = (walls.left.x + walls.right.x) / 2 >= x ? 1 : -1;
+        var tCrown = fallTime(Math.max(-gap - y, 0.05), vy, 2.4);
+        vx = into * (gap * 0.25) / Math.max(tCrown, 0.02);
+      } else {
+        var goRight = rng() < 0.5;
+        var targetX = goRight ? walls.right.x : walls.left.x;
+        var sign = targetX >= x ? 1 : -1;
+        var safe = maxSafeSpeed(x, y, vy, targetX, walls.exitY);
+        vx = sign * safe * (0.78 + rng() * 0.16);
+      }
     }
     vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY, gap);
     var points = [{ x: roundStep(x), y: roundStep(y) }];
@@ -661,6 +802,8 @@
     var pins = pinsNear(env.row);
     var stalled = false;
     var step;
+    // One row of rise still reaches the pin above. A harder climb stalls in the taller channel.
+    var maxUp = Math.sqrt(2 * g * LOGICAL_ROW);
     for (step = 0; step < 900; step++) {
       if (y > walls.exitY - 0.03 && vy > 0) {
         var pinX = vx >= 0 ? walls.right.x : walls.left.x;
@@ -681,10 +824,20 @@
           var dx = x - peg.x;
           var dy = y - peg.y;
           var dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < gap && (best === null || dist < best.dist)) best = { peg: peg, dist: dist };
+          if (dist < gap) {
+            var pinPen = gap - dist;
+            if (best === null || pinPen > best.pen) best = { peg: peg, pen: pinPen };
+          }
+        }
+        var wall = deepestWall(x, y, gap);
+        if (wall) {
+          var wallPen = gap - wall.signed;
+          if (best === null || wallPen > best.pen) best = { wall: wall, pen: wallPen };
         }
         if (!best) break;
-        var bounced = reflectDisk(x, y, vx, vy, best.peg, gap, restitution);
+        var bounced = best.wall
+          ? reflectSegment(x, y, vx, vy, best.wall.a, best.wall.b, gap, restitution)
+          : reflectDisk(x, y, vx, vy, best.peg, gap, restitution);
         if (!bounced) break;
         x = bounced.x;
         y = bounced.y;
@@ -692,39 +845,13 @@
         vy = bounced.vy;
         if (!bounced.reflected) break;
         hits += 1;
-        if (best.peg.y < walls.exitY - 0.2) {
+        if (best.peg && best.peg.y < walls.exitY - 0.2) {
           overheadHits += 1;
           if (!overhead) {
             overhead = { nx: bounced.nx, ny: bounced.ny, vx: bounced.vx, vy: bounced.vy };
           }
         }
         vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY, gap);
-      }
-      if (walls.left.virtual) {
-        var leftHit = reflectPlane(x, y, vx, vy, walls.left.x, 1, gap, restitution);
-        if (leftHit) {
-          x = leftHit.x;
-          y = leftHit.y;
-          vx = leftHit.vx;
-          vy = leftHit.vy;
-          if (leftHit.reflected) {
-            hits += 1;
-            vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY, gap);
-          }
-        }
-      }
-      if (walls.right.virtual) {
-        var rightHit = reflectPlane(x, y, vx, vy, walls.right.x, -1, gap, restitution);
-        if (rightHit) {
-          x = rightHit.x;
-          y = rightHit.y;
-          vx = rightHit.vx;
-          vy = rightHit.vy;
-          if (rightHit.reflected) {
-            hits += 1;
-            vx = capHorizontal(x, y, vx, vy, walls.left.x, walls.right.x, walls.exitY, gap);
-          }
-        }
       }
       if (x <= walls.left.x) {
         x = roundStep(walls.left.x + 0.004);
@@ -744,6 +871,7 @@
       }
       if (!nearlyStill) stalled = false;
       if (hits >= 3 && vy < 0) vy = roundStep(vy * 0.97);
+      if (vy < -maxUp) vy = roundStep(-maxUp);
       points.push({ x: roundStep(x), y: roundStep(y) });
       if (y > walls.exitY && x > handoff.x0 && x < handoff.x1) {
         return {
@@ -792,12 +920,15 @@
     return { x0: x0, x1: x1 };
   }
 
-  function guidedRoute(path, seed, diskRadius, pegRadius) {
+  function guidedRoute(path, seed, diskRadius, pegRadius, spacing) {
     var disk = diskSpec(diskRadius, pegRadius);
-    var layout = contactsFor(path, seed >>> 0, disk.gap);
+    var layout = contactsFor(path, seed >>> 0, disk.gap, disk.diskRadius, spacing);
     var hops = [];
     for (var i = 0; i < layout.points.length - 1; i++) {
-      hops.push({ points: sampleGuidedHop(layout.points[i], layout.points[i + 1]), fallback: false });
+      var hopPoints = i === 0
+        ? sampleFirstDrop(layout.points[0], layout.points[1], disk.gap)
+        : sampleGuidedHop(layout.points[i], layout.points[i + 1]);
+      hops.push({ points: hopPoints, fallback: false });
     }
     return {
       animation: "guided",
@@ -810,9 +941,9 @@
     };
   }
 
-  function simulatePhysics(path, seed, diskRadius, pegRadius) {
+  function simulatePhysics(path, seed, diskRadius, pegRadius, spacing) {
     var disk = diskSpec(diskRadius, pegRadius);
-    var layout = contactsFor(path, seed >>> 0, disk.gap);
+    var layout = contactsFor(path, seed >>> 0, disk.gap, disk.diskRadius, spacing);
     var hops = [];
     var fallback = false;
     var pos = layout.points[0];
@@ -867,7 +998,7 @@
       rights = nextRights;
     }
     var lastTo = layout.points[layout.points.length - 1];
-    var intoBin = simulateFall(pos, lastTo);
+    var intoBin = simulateFall(pos, lastTo, disk.gap);
     if (!intoBin.hit) {
       fallback = true;
       hops.push({ points: sampleGuidedHop(pos, lastTo), fallback: true, hits: 0 });
@@ -885,15 +1016,15 @@
     };
   }
 
-  function routeFor(path, seed, animation, diskRadius, pegRadius) {
-    if (animation === "guided-physics") return simulatePhysics(path, seed, diskRadius, pegRadius);
-    return guidedRoute(path, seed, diskRadius, pegRadius);
+  function routeFor(path, seed, animation, diskRadius, pegRadius, spacing) {
+    if (animation === "guided-physics") return simulatePhysics(path, seed, diskRadius, pegRadius, spacing);
+    return guidedRoute(path, seed, diskRadius, pegRadius, spacing);
   }
 
   function logicalToCanvas(point, geo) {
     return {
       x: geo.centerX + point.x * geo.spacing,
-      y: point.bin ? geo.binBallY : geo.pegTop + (point.y / LOGICAL_ROW) * geo.rowGap
+      y: geo.pegTop + (point.y / LOGICAL_ROW) * geo.rowGap
     };
   }
 
@@ -917,22 +1048,32 @@
     return 1 - Math.pow(1 - t, 3);
   }
 
+  function wallPoints(geo) {
+    var outline = boardWalls();
+    function toCanvas(pts) {
+      var out = [];
+      var i;
+      for (i = 0; i < pts.length; i++) out.push(logicalToCanvas(pts[i], geo));
+      return out;
+    }
+    return { left: toCanvas(outline.left), right: toCanvas(outline.right) };
+  }
+
   function drawBoard(ctx, geo, view) {
     ctx.clearRect(0, 0, geo.width, geo.height);
 
+    var walls = wallPoints(geo);
     var i;
-    for (i = 0; i < PAYOUTS.length; i++) {
-      var x = geo.padX + i * (geo.binWidth + geo.gap);
-      var landed = view.highlight === i;
-      ctx.fillStyle = landed ? "#1c2430" : i % 2 === 0 ? "#f3efe6" : "#e4ded2";
-      ctx.fillRect(x, geo.binTop, geo.binWidth, geo.binH);
-      ctx.fillStyle = landed ? "#fbfaf7" : "#1c2430";
-      var labelSize = Math.max(11, Math.min(16, geo.binWidth * 0.3));
-      ctx.font = "bold " + labelSize + "px Segoe UI, Helvetica, Arial, sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(formatMoney(PAYOUTS[i]), x + geo.binWidth / 2, geo.binTop + geo.binH / 2);
-    }
+    ctx.strokeStyle = "#5e6a72";
+    ctx.lineWidth = geo.pegRadiusPx * 2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(walls.left[0].x, walls.left[0].y);
+    for (i = 1; i < walls.left.length; i++) ctx.lineTo(walls.left[i].x, walls.left[i].y);
+    ctx.moveTo(walls.right[0].x, walls.right[0].y);
+    for (i = 1; i < walls.right.length; i++) ctx.lineTo(walls.right[i].x, walls.right[i].y);
+    ctx.stroke();
 
     ctx.fillStyle = "#5e6a72";
     for (var r = 0; r < ROWS; r++) {
@@ -952,6 +1093,25 @@
       ctx.lineWidth = 2;
       ctx.strokeStyle = "#7c2d12";
       ctx.stroke();
+    }
+
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    for (i = 0; i < PAYOUTS.length; i++) {
+      var x = geo.padX + i * (geo.binWidth + geo.gap);
+      ctx.fillStyle = i % 2 === 0 ? "#f3efe6" : "#e4ded2";
+      ctx.fillRect(x, geo.binTop, geo.binWidth, geo.binH);
+    }
+    ctx.restore();
+
+    var labelSize = Math.max(14, Math.min(20, geo.binWidth * 0.38));
+    ctx.font = "bold " + labelSize + "px Segoe UI, Helvetica, Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#1c2430";
+    for (i = 0; i < PAYOUTS.length; i++) {
+      var labelX = geo.padX + i * (geo.binWidth + geo.gap);
+      ctx.fillText(formatMoney(PAYOUTS[i]), labelX + geo.binWidth / 2, geo.binTop + geo.binH / 2);
     }
   }
 
@@ -984,6 +1144,7 @@
       animation: userOptions && userOptions.animation === "guided-physics" ? "guided-physics" : "guided",
       diskRadius: diskSpec(userOptions && userOptions.diskRadius, userOptions && userOptions.pegRadius).diskRadius,
       pegRadius: diskSpec(userOptions && userOptions.diskRadius, userOptions && userOptions.pegRadius).pegRadius,
+      seed: userOptions && userOptions.seed !== undefined ? userOptions.seed : undefined,
       onComplete: userOptions && userOptions.onComplete ? userOptions.onComplete : function () {}
     };
 
@@ -1045,20 +1206,17 @@
 
     function ctx2d() {
       var cssWidth = canvas.clientWidth || 720;
-      var cssHeight = Math.max(380, Math.round(Math.min(cssWidth * 0.58, 440)));
-      canvas.style.height = cssHeight + "px";
+      var geo = layoutOf(cssWidth, {
+        diskRadius: options.diskRadius,
+        pegRadius: options.pegRadius
+      });
+      canvas.style.height = geo.height + "px";
       var dpr = Math.min((window.devicePixelRatio || 1), 2);
       canvas.width = Math.round(cssWidth * dpr);
-      canvas.height = Math.round(cssHeight * dpr);
+      canvas.height = Math.round(geo.height * dpr);
       var ctx = canvas.getContext("2d");
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      return {
-        ctx: ctx,
-        geo: layoutOf(cssWidth, cssHeight, {
-          diskRadius: options.diskRadius,
-          pegRadius: options.pegRadius
-        })
-      };
+      return { ctx: ctx, geo: geo };
     }
 
     function paint() {
@@ -1066,7 +1224,7 @@
       var surface = ctx2d();
       var geo = surface.geo;
       if (view.path && view.ball && view.ball.settled && view.highlight !== null) {
-        var rested = logicalToCanvas(logicalBin(view.highlight), geo);
+        var rested = logicalToCanvas(logicalBin(view.highlight, options.diskRadius, geo.spacing), geo);
         view.ball = { x: rested.x, y: rested.y, settled: true };
       } else if (!view.ball || !view.path) {
         var rest = logicalToCanvas(logicalStart(options.diskRadius + options.pegRadius), geo);
@@ -1146,7 +1304,12 @@
         }
         if (localT < 0) localT = 0;
         if (localT > 1) localT = 1;
-        var eased = idx >= durations.length - 2 ? easeOutCubic(localT) : localT;
+        var eased =
+          route.animation === "guided-physics"
+            ? localT
+            : idx >= durations.length - 2
+              ? easeOutCubic(localT)
+              : localT;
         var logical = pointOnHop(route.hops[idx], eased);
         var canvasPoint = logicalToCanvas(logical, surface.geo);
         view.path = settledRecord.path;
@@ -1188,10 +1351,26 @@
       choosing = true;
       playBtn.disabled = true;
       declineBtn.disabled = true;
-      var trial = drawTrial();
+      var seed = typeof options.seed === "function" ? options.seed() : options.seed;
+      var trial = drawTrial(seed);
       record = createRecord(options, decision, trial);
-      route = routeFor(trial.path, trial.seed, options.animation, options.diskRadius, options.pegRadius);
+      var dropGeo = ctx2d().geo;
+      route = routeFor(
+        trial.path,
+        trial.seed,
+        options.animation,
+        options.diskRadius,
+        options.pegRadius,
+        dropGeo.spacing
+      );
       record.physics_fallback = route.fallback;
+      if (route.animation === "guided-physics") {
+        var played = playbackDurations(options.dropDurationMs, route.hops);
+        var playedMs = 0;
+        var pi;
+        for (pi = 0; pi < played.length; pi++) playedMs += played[pi];
+        record.drop_duration_ms = Math.round(playedMs);
+      }
       writeStored(key, record);
       beginTimedTrial(record);
     }
@@ -1241,6 +1420,7 @@
   return {
     TASK_VERSION: TASK_VERSION,
     ROWS: ROWS,
+    LOGICAL_ROW: LOGICAL_ROW,
     PAYOUTS: PAYOUTS,
     WEIGHTS: WEIGHTS,
     DEFAULT_ENDOWMENT: DEFAULT_ENDOWMENT,

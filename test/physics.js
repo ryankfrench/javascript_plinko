@@ -58,6 +58,14 @@ for (mask = 0; mask < 256; mask++) {
   var sim = Plinko.simulatePhysics(path, 1);
   assertRoute(sim, path);
   assertInsideChannel(sim, path);
+  var openMin = 1e9;
+  var openI;
+  for (openI = 0; openI < sim.hops[0].points.length; openI++) {
+    var openPt = sim.hops[0].points[openI];
+    var openD = Math.hypot(openPt.x, openPt.y);
+    if (openD < openMin) openMin = openD;
+  }
+  if (openMin > Plinko.diskSpec().gap + 0.02) fail(path + " missed the first pin");
   if (sim.fallback) fallbacks += 1;
   var again = Plinko.simulatePhysics(path, 1);
   if (JSON.stringify(sim.hops[3].points) !== JSON.stringify(again.hops[3].points)) {
@@ -91,7 +99,7 @@ if (rattles < 8) fail("interior channels should bounce more than once, saw " + r
 
 var walls = Plinko.wallsForStep(2, 1, 1);
 var gap = Plinko.diskSpec().gap;
-var overhead = { x: (walls.left.x + walls.right.x) / 2, y: walls.exitY - 0.58 };
+var overhead = { x: (walls.left.x + walls.right.x) / 2, y: walls.exitY - Plinko.LOGICAL_ROW };
 var launched = {
   x: overhead.x + 0.04,
   y: overhead.y + 0.2,
@@ -118,6 +126,18 @@ var rightHit = guidedRight.hops[0].points[guidedRight.hops[0].points.length - 1]
 if (!(leftHit.x < 0)) fail("a left bounce should meet the peg on its left shoulder");
 if (!(rightHit.x > 0)) fail("a right bounce should meet the peg on its right shoulder");
 if (guidedRight.hops[0].points.length !== 17) fail("a guided hop should stay a single shallow arc");
+var crownGap = Plinko.diskSpec().gap;
+function landsOnCrown(points) {
+  var i;
+  for (i = 0; i < points.length; i++) {
+    var dx = points[i].x;
+    var dy = points[i].y + crownGap;
+    if (dx * dx + dy * dy < 0.0004) return true;
+  }
+  return false;
+}
+if (!landsOnCrown(guidedLeft.hops[0].points)) fail("a left opening drop should hit the top of the first pin");
+if (!landsOnCrown(guidedRight.hops[0].points)) fail("a right opening drop should hit the top of the first pin");
 
 var arc = guidedRight.hops[2];
 var from = arc.points[0];
