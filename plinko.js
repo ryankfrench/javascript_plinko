@@ -261,10 +261,6 @@
       "  font-size: 1.35rem;",
       "  font-weight: 650;",
       "}",
-      ".plinko-instruction {",
-      "  margin: 0 0 12px;",
-      "  font-size: 1.05rem;",
-      "}",
       ".plinko-canvas {",
       "  display: block;",
       "  width: 100%;",
@@ -297,6 +293,7 @@
       "  outline-offset: 2px;",
       "}",
       ".plinko-banner {",
+      "  position: relative;",
       "  margin: 0 0 12px;",
       "  padding: 16px 18px;",
       "  border-radius: 8px;",
@@ -305,7 +302,17 @@
       "  font-size: 1.2rem;",
       "  line-height: 1.45;",
       "}",
-      ".plinko-banner:empty { display: none; }",
+      ".plinko-banner-sizer {",
+      "  visibility: hidden;",
+      "  margin: 0;",
+      "}",
+      ".plinko-banner-text {",
+      "  position: absolute;",
+      "  top: 16px;",
+      "  right: 18px;",
+      "  left: 18px;",
+      "  margin: 0;",
+      "}",
       ".plinko-banner:focus { outline: none; }"
     ].join("\n");
     document.head.appendChild(style);
@@ -1145,6 +1152,7 @@
       diskRadius: diskSpec(userOptions && userOptions.diskRadius, userOptions && userOptions.pegRadius).diskRadius,
       pegRadius: diskSpec(userOptions && userOptions.diskRadius, userOptions && userOptions.pegRadius).pegRadius,
       seed: userOptions && userOptions.seed !== undefined ? userOptions.seed : undefined,
+      completed: !!(userOptions && userOptions.completed),
       onComplete: userOptions && userOptions.onComplete ? userOptions.onComplete : function () {}
     };
 
@@ -1159,10 +1167,6 @@
     endowmentEl.className = "plinko-endowment";
     endowmentEl.textContent = "You have " + formatMoney(options.endowment) + " for this opportunity.";
 
-    var instructionEl = document.createElement("p");
-    instructionEl.className = "plinko-instruction";
-    instructionEl.textContent = "Play it on this board, or decline and keep it.";
-
     var canvas = document.createElement("canvas");
     canvas.className = "plinko-canvas";
     canvas.setAttribute("aria-hidden", "true");
@@ -1173,10 +1177,14 @@
     var playBtn = document.createElement("button");
     playBtn.type = "button";
     playBtn.textContent = "Play";
+    playBtn.disabled = true;
+    playBtn.setAttribute("aria-pressed", "false");
 
     var declineBtn = document.createElement("button");
     declineBtn.type = "button";
     declineBtn.textContent = "Decline";
+    declineBtn.disabled = true;
+    declineBtn.setAttribute("aria-pressed", "false");
 
     var banner = document.createElement("div");
     banner.className = "plinko-banner";
@@ -1184,10 +1192,20 @@
     banner.setAttribute("aria-live", "polite");
     banner.tabIndex = -1;
 
+    var bannerSizer = document.createElement("p");
+    bannerSizer.className = "plinko-banner-sizer";
+    bannerSizer.setAttribute("aria-hidden", "true");
+    bannerSizer.textContent = protocolMessage("decline", options.endowment);
+
+    var bannerText = document.createElement("p");
+    bannerText.className = "plinko-banner-text";
+    bannerText.textContent = "Play it on this board, or decline and keep it.";
+
+    banner.appendChild(bannerSizer);
+    banner.appendChild(bannerText);
     actions.appendChild(playBtn);
     actions.appendChild(declineBtn);
     app.appendChild(endowmentEl);
-    app.appendChild(instructionEl);
     app.appendChild(banner);
     app.appendChild(canvas);
     app.appendChild(actions);
@@ -1197,6 +1215,7 @@
     var timer = null;
     var completeTimer = null;
     var raf = 0;
+    var routeFrame = 0;
     var completed = false;
     var choosing = false;
     var record = null;
@@ -1248,15 +1267,26 @@
       }, 0);
     }
 
+    function setBanner(text) {
+      bannerText.textContent = text;
+    }
+
+    function markDecision(decision) {
+      app.setAttribute("data-decision", decision);
+      playBtn.setAttribute("aria-pressed", decision === "play" ? "true" : "false");
+      declineBtn.setAttribute("aria-pressed", decision === "decline" ? "true" : "false");
+    }
+
     function showOutcome(settledRecord, staticReveal) {
-      actions.style.display = "none";
-      instructionEl.style.display = "none";
-      endowmentEl.style.display = "none";
-      banner.textContent = outcomeMessage(
-        settledRecord.decision,
-        settledRecord.payout,
-        settledRecord.earnings,
-        settledRecord.endowment
+      playBtn.disabled = true;
+      declineBtn.disabled = true;
+      setBanner(
+        outcomeMessage(
+          settledRecord.decision,
+          settledRecord.payout,
+          settledRecord.earnings,
+          settledRecord.endowment
+        )
       );
       view.path = settledRecord.path;
       view.highlight = settledRecord.bin;
@@ -1331,19 +1361,54 @@
     }
 
     function beginTimedTrial(settledRecord) {
-      actions.style.display = "none";
-      instructionEl.style.display = "none";
-      banner.textContent = protocolMessage(settledRecord.decision, settledRecord.endowment);
+      setBanner(protocolMessage(settledRecord.decision, settledRecord.endowment));
       banner.focus();
       app.setAttribute("data-state", "message");
+      paint();
       timer = setTimeout(function () {
-        if (dead) return;
-        var started = new Date().toISOString();
-        settledRecord.message_offset_iso = started;
-        settledRecord.animation_start_iso = started;
-        writeStored(key, settledRecord);
-        runDrop(settledRecord);
+        startDropWhenReady(settledRecord);
       }, options.messageDwellMs);
+    }
+
+    function startDropWhenReady(settledRecord) {
+      if (dead) return;
+      if (!route) {
+        timer = setTimeout(function () {
+          startDropWhenReady(settledRecord);
+        }, 16);
+        return;
+      }
+      var started = new Date().toISOString();
+      settledRecord.message_offset_iso = started;
+      settledRecord.animation_start_iso = started;
+      writeStored(key, settledRecord);
+      runDrop(settledRecord);
+    }
+
+    function buildRoute(trial) {
+      if (dead || !record) return;
+      var spacing = layoutOf(canvas.clientWidth || 720, {
+        diskRadius: options.diskRadius,
+        pegRadius: options.pegRadius
+      }).spacing;
+      route = routeFor(
+        trial.path,
+        trial.seed,
+        options.animation,
+        options.diskRadius,
+        options.pegRadius,
+        spacing
+      );
+      if (dead) return;
+      record.physics_fallback = route.fallback;
+      if (route.animation === "guided-physics") {
+        var played = playbackDurations(options.dropDurationMs, route.hops);
+        var playedMs = 0;
+        var pi;
+        for (pi = 0; pi < played.length; pi++) playedMs += played[pi];
+        record.drop_duration_ms = Math.round(playedMs);
+      }
+      writeStored(key, record);
     }
 
     function choose(decision) {
@@ -1354,35 +1419,71 @@
       var seed = typeof options.seed === "function" ? options.seed() : options.seed;
       var trial = drawTrial(seed);
       record = createRecord(options, decision, trial);
-      var dropGeo = ctx2d().geo;
-      route = routeFor(
-        trial.path,
-        trial.seed,
-        options.animation,
-        options.diskRadius,
-        options.pegRadius,
-        dropGeo.spacing
-      );
-      record.physics_fallback = route.fallback;
-      if (route.animation === "guided-physics") {
-        var played = playbackDurations(options.dropDurationMs, route.hops);
-        var playedMs = 0;
-        var pi;
-        for (pi = 0; pi < played.length; pi++) playedMs += played[pi];
-        record.drop_duration_ms = Math.round(playedMs);
-      }
+      markDecision(decision);
       writeStored(key, record);
       beginTimedTrial(record);
+      routeFrame = window.requestAnimationFrame(function () {
+        routeFrame = 0;
+        if (dead) return;
+        buildRoute(trial);
+      });
     }
 
     function restore(saved) {
       saved.interrupted = true;
       if (!saved.next_enabled_iso) saved.next_enabled_iso = new Date().toISOString();
       record = saved;
+      choosing = true;
+      playBtn.disabled = true;
+      declineBtn.disabled = true;
+      markDecision(saved.decision);
       writeStored(key, saved);
       showOutcome(saved, true);
       app.setAttribute("data-state", "interrupted");
       finish(saved);
+    }
+
+    function readSeed() {
+      var seed = typeof options.seed === "function" ? options.seed() : options.seed;
+      if (seed === undefined || seed === null || seed === "") return null;
+      var n = Number(seed);
+      if (!isFinite(n)) return null;
+      return n >>> 0;
+    }
+
+    function showSettledSeed() {
+      var seed = readSeed();
+      if (seed === null) return false;
+      var trial = drawTrial(seed);
+      record = {
+        completed: true,
+        seed: trial.seed,
+        path: trial.path,
+        bin: trial.bin,
+        payout: trial.payout
+      };
+      choosing = true;
+      playBtn.disabled = true;
+      declineBtn.disabled = true;
+      setBanner("The ball landed on " + formatMoney(trial.payout) + ".");
+      view.path = trial.path;
+      view.highlight = trial.bin;
+      view.ball = { settled: true };
+      app.setAttribute("data-state", "completed");
+      app.setAttribute("data-bin", String(trial.bin));
+      paint();
+      return true;
+    }
+
+    function enableChoice() {
+      if (dead || record || choosing) return;
+      if (!(canvas.clientWidth > 0)) {
+        window.requestAnimationFrame(enableChoice);
+        return;
+      }
+      paint();
+      playBtn.disabled = false;
+      declineBtn.disabled = false;
     }
 
     playBtn.addEventListener("click", function () {
@@ -1398,11 +1499,14 @@
     }
     window.addEventListener("resize", onResize);
 
-    var existing = readStored(key);
-    if (existing && validPath(existing.path) && (existing.decision === "play" || existing.decision === "decline")) {
-      restore(existing);
-    } else {
-      paint();
+    if (!(options.completed && showSettledSeed())) {
+      var existing = readStored(key);
+      if (existing && validPath(existing.path) && (existing.decision === "play" || existing.decision === "decline")) {
+        restore(existing);
+      } else {
+        paint();
+        window.requestAnimationFrame(enableChoice);
+      }
     }
 
     return {
@@ -1411,8 +1515,15 @@
         if (timer) window.clearTimeout(timer);
         if (completeTimer) window.clearTimeout(completeTimer);
         if (raf) window.cancelAnimationFrame(raf);
+        if (routeFrame) window.cancelAnimationFrame(routeFrame);
         window.removeEventListener("resize", onResize);
         if (el.contains(app)) el.removeChild(app);
+      },
+      getRecord: function () {
+        return record;
+      },
+      getDecision: function () {
+        return record && record.decision ? record.decision : null;
       }
     };
   }

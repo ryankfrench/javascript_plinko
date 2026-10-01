@@ -8,13 +8,15 @@ The account must have custom code enabled. Free and trial accounts turn it off.
 
 The participant sees the board and a $10 endowment, then chooses Play or Decline. The ball drops either way. There is no practice drop.
 
+The status line stays in one dark box for the whole round, including the opening sentence, so the board does not move when the text changes. Play and Decline stay on screen. They are disabled until the board has been drawn, and they stay disabled after the choice. The choice is on the board element as `data-decision` as soon as the button is clicked. `getDecision()` and `getRecord()` on the mount handle return it before the drop finishes.
+
 Play shows: "The ball will now drop. Where it lands determines your earnings for this opportunity."
 
 Decline shows: "The ball will now drop. You chose not to play, so where it lands will NOT affect your earnings of $10 for this opportunity."
 
 That message stays up for 4 seconds. The drop then takes 10 seconds. The landing stays up for 4 seconds before Next appears. Play pays the bin. Decline pays $10 either way. `signed_outcome` is always the bin amount minus $10.
 
-A refresh or Back after the choice does not draw a new bin and does not replay the drop. The saved landing is shown in place, and the trial is stored with `interrupted: true`.
+A refresh or Back after the choice does not draw a new bin and does not replay the drop. The saved landing is shown in place, the buttons stay visible and disabled, and the trial is stored with `interrupted: true`.
 
 Use one question per round, on its own page, so other items can sit between rounds. Set `ROUND` to `1` or `2` in that question's script.
 
@@ -80,6 +82,8 @@ revealDwellMs: 4000
 
 `message_offset_iso` and `animation_start_iso` are the same moment: the end of the reading dwell, when the ball starts. The sentence stays on screen until the landing. `payout` is a number, so $2.50 is stored as `2.5`.
 
+`decision` is stored, and set on the board as `data-decision`, when Play or Decline is clicked. It does not wait for the landing.
+
 Timestamps are the machine clock FaceReader has to be aligned to. This task does not talk to FaceReader.
 
 ## Pilot page
@@ -91,6 +95,8 @@ Open [index.html](index.html) on a local web server. It runs both rounds, shows 
 ```
 
 `motion` is `guided` or `guided-physics`. `disk` is `0.12`, `0.2`, `0.26`, or `0.34`. `pins` is `0.066` or `0.09`. Do not use this page with participants.
+
+`?seed=12345&completed=1` draws that seed and shows the disk already in its bin. It does not play the drop, write session storage, or advance to round 2. The status line says where the ball landed. An empty seed ignores `completed` and starts a normal round. The same options are `completed: true` and `seed` on `Plinko.mount`. `getRecord()` then returns `{ completed: true, seed, path, bin, payout }`.
 
 ```bash
 python3 -m http.server 8765
@@ -112,7 +118,8 @@ The first runs 100,000 draws and checks the binomial counts, the path, the payou
 In Qualtrics preview, on a paid account with custom code on:
 
 - Next is hidden until the landing has been on screen for the reveal dwell.
-- Play and Decline show the sentences above, unchanged.
+- Play and Decline show the sentences above, unchanged, in the same dark box as the opening line.
+- Play and Decline stay visible, and both are disabled after the choice. `data-decision` is `play` or `decline` before the drop finishes.
 - Decline still records earnings of 10.
 - The text-entry answer is the JSON, and its `bin` matches the highlighted bin.
 - A refresh after the choice shows the landing without playing the drop again, and `interrupted` is true.

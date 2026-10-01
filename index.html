@@ -94,6 +94,7 @@
     (function () {
       var params = new URLSearchParams(window.location.search);
       var fast = params.get("fast") === "1";
+      var completedPreview = params.get("completed") === "1";
       if (params.get("seed")) document.getElementById("seed").value = params.get("seed");
 
       function applyChoice(id, raw) {
@@ -137,6 +138,7 @@
           animation: document.getElementById("motion").value,
           diskRadius: Number(document.getElementById("disk").value),
           pegRadius: Number(document.getElementById("peg").value),
+          completed: completedPreview,
           seed: function () {
             var raw = document.getElementById("seed").value.trim();
             if (!raw) return undefined;
@@ -156,6 +158,11 @@
             }
           }
         });
+        var settled = handle.getRecord();
+        if (settled && settled.completed) {
+          logs.push(settled);
+          render();
+        }
       }
 
       document.getElementById("reset").addEventListener("click", function () {
