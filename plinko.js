@@ -100,23 +100,23 @@
 
   function protocolMessage(decision, endowment) {
     if (decision === "play") {
-      return "The ball will now drop. Where it lands determines your earnings for this stage.";
+      return "The ball will now drop. Where it lands determines your earnings for this opportunity.";
     }
     return (
       "The ball will now drop. You chose not to play, so where it lands will NOT affect your earnings of " +
       formatMoney(endowment) +
-      " for this stage."
+      " for this opportunity."
     );
   }
 
   function outcomeMessage(decision, payout, earnings, endowment) {
     if (decision === "play") {
-      return "You earn " + formatMoney(earnings) + " for this stage.";
+      return "You earn " + formatMoney(earnings) + " for this opportunity.";
     }
     return (
       "You keep " +
       formatMoney(endowment) +
-      " for this stage. The ball landed on " +
+      " for this opportunity. The ball landed on " +
       formatMoney(payout) +
       "."
     );
@@ -1157,7 +1157,7 @@
 
     var endowmentEl = document.createElement("p");
     endowmentEl.className = "plinko-endowment";
-    endowmentEl.textContent = "You have " + formatMoney(options.endowment) + " for this stage.";
+    endowmentEl.textContent = "You have " + formatMoney(options.endowment) + " for this opportunity.";
 
     var instructionEl = document.createElement("p");
     instructionEl.className = "plinko-instruction";

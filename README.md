@@ -8,9 +8,9 @@ The account must have custom code enabled. Free and trial accounts turn it off.
 
 The participant sees the board and a $10 endowment, then chooses Play or Decline. The ball drops either way. There is no practice drop.
 
-Play shows: "The ball will now drop. Where it lands determines your earnings for this stage."
+Play shows: "The ball will now drop. Where it lands determines your earnings for this opportunity."
 
-Decline shows: "The ball will now drop. You chose not to play, so where it lands will NOT affect your earnings of $10 for this stage."
+Decline shows: "The ball will now drop. You chose not to play, so where it lands will NOT affect your earnings of $10 for this opportunity."
 
 That message stays up for 4 seconds. The drop then takes 10 seconds. The landing stays up for 4 seconds before Next appears. Play pays the bin. Decline pays $10 either way. `signed_outcome` is always the bin amount minus $10.
 

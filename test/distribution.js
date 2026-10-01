@@ -24,11 +24,11 @@ if (Math.abs(Plinko.expectedPayout() - theoreticalEv) > 1e-9) {
 }
 
 if (Plinko.protocolMessage("play", 10) !==
-  "The ball will now drop. Where it lands determines your earnings for this stage.") {
+  "The ball will now drop. Where it lands determines your earnings for this opportunity.") {
   fail("play message does not match the protocol");
 }
 if (Plinko.protocolMessage("decline", 10) !==
-  "The ball will now drop. You chose not to play, so where it lands will NOT affect your earnings of $10 for this stage.") {
+  "The ball will now drop. You chose not to play, so where it lands will NOT affect your earnings of $10 for this opportunity.") {
   fail("decline message does not match the protocol");
 }
 
