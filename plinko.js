@@ -1153,6 +1153,9 @@
       pegRadius: diskSpec(userOptions && userOptions.diskRadius, userOptions && userOptions.pegRadius).pegRadius,
       seed: userOptions && userOptions.seed !== undefined ? userOptions.seed : undefined,
       completed: !!(userOptions && userOptions.completed),
+      onChoice: userOptions && userOptions.onChoice ? userOptions.onChoice : function () {},
+      onAnimationStart: userOptions && userOptions.onAnimationStart ? userOptions.onAnimationStart : function () {},
+      onLand: userOptions && userOptions.onLand ? userOptions.onLand : function () {},
       onComplete: userOptions && userOptions.onComplete ? userOptions.onComplete : function () {}
     };
 
@@ -1351,6 +1354,7 @@
           settledRecord.animation_end_iso = doneAt;
           settledRecord.reveal_onset_iso = doneAt;
           writeStored(key, settledRecord);
+          options.onLand(settledRecord);
           armReveal(settledRecord);
           return;
         }
@@ -1382,6 +1386,7 @@
       settledRecord.message_offset_iso = started;
       settledRecord.animation_start_iso = started;
       writeStored(key, settledRecord);
+      options.onAnimationStart(settledRecord);
       runDrop(settledRecord);
     }
 
@@ -1421,6 +1426,7 @@
       record = createRecord(options, decision, trial);
       markDecision(decision);
       writeStored(key, record);
+      options.onChoice(record);
       beginTimedTrial(record);
       routeFrame = window.requestAnimationFrame(function () {
         routeFrame = 0;

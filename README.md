@@ -58,13 +58,13 @@ Create two text-entry questions, one page each. For each question:
 4. Set `SCRIPT_URL` to the hosted file.
 5. In Survey Flow, add these embedded data fields before the block, empty to start. The text-entry answer is the full JSON and is the primary record. The fields below are for display logic and piping.
 
-Round 1: `plinko_r1_decision`, `plinko_r1_bin`, `plinko_r1_payout`, `plinko_r1_earnings`, `plinko_r1_json`
+Round 1: `plinko_r1_decision`, `plinko_r1_bin`, `plinko_r1_payout`, `plinko_r1_earnings`, `plinko_r1_json`, `plinko_r1_choice`, `plinko_r1_animation_start`, `plinko_r1_animation_end`, `plinko_r1_next_enabled`
 
-Round 2: `plinko_r2_decision`, `plinko_r2_bin`, `plinko_r2_payout`, `plinko_r2_earnings`, `plinko_r2_json`
+Round 2: `plinko_r2_decision`, `plinko_r2_bin`, `plinko_r2_payout`, `plinko_r2_earnings`, `plinko_r2_json`, `plinko_r2_choice`, `plinko_r2_animation_start`, `plinko_r2_animation_end`, `plinko_r2_next_enabled`
 
 On the newer survey-taking experience, also add the same names with an `__js_` prefix, such as `__js_plinko_r1_decision`. `setJSEmbeddedData` writes those names.
 
-The loader hides Next until the reveal dwell ends, hides the text box, and writes the JSON into it again on page submit.
+The loader hides Next and Previous until the reveal dwell ends, then shows both. If `plinko_r1_decision` or `plinko_r2_decision` is already `play` or `decline`, that question opens with `completed: true` and both buttons stay available. It hides the text box and writes the JSON into it again on page submit. The survey options have to allow the Back button.
 
 To change timing for a pilot, add any of these to the `Plinko.mount` call in the loader. The participant page has no duration control.
 
@@ -83,6 +83,8 @@ revealDwellMs: 4000
 `message_offset_iso` and `animation_start_iso` are the same moment: the end of the reading dwell, when the ball starts. The sentence stays on screen until the landing. `payout` is a number, so $2.50 is stored as `2.5`.
 
 `decision` is stored, and set on the board as `data-decision`, when Play or Decline is clicked. It does not wait for the landing.
+
+The loader writes four of those times to embedded data as soon as each one happens. The names are `plinko_r1_choice`, `plinko_r1_animation_start`, `plinko_r1_animation_end`, and `plinko_r1_next_enabled` on round 1, and the same names with `r2` on round 2. The values use the video-task clock, `YYYY-MM-DD HH:mm:ss.SSS` in the participant's local time, the same format as `moment().format` in `task1.js`. `choice` is the Play or Decline click. `animation_start` is when the disk starts moving, after the message dwell. `animation_end` is when it reaches the bin. `next_enabled` is the end of the outcome pause, when Next is shown. The same fields are written again with the trial record. The JSON record still keeps the ISO names, such as `choice_iso`. Add the embedded fields in Survey Flow, and the `__js_` copies on the newer survey-taking experience.
 
 Timestamps are the machine clock FaceReader has to be aligned to. This task does not talk to FaceReader.
 
@@ -117,7 +119,7 @@ The first runs 100,000 draws and checks the binomial counts, the path, the payou
 
 In Qualtrics preview, on a paid account with custom code on:
 
-- Next is hidden until the landing has been on screen for the reveal dwell.
+- Next and Previous are hidden until the landing has been on screen for the reveal dwell. A return visit with `plinko_r1_decision` or `plinko_r2_decision` already set shows the settled board and both buttons.
 - Play and Decline show the sentences above, unchanged, in the same dark box as the opening line.
 - Play and Decline stay visible, and both are disabled after the choice. `data-decision` is `play` or `decline` before the drop finishes.
 - Decline still records earnings of 10.
