@@ -79,7 +79,9 @@
   }
 
   function drawTrial(seed) {
-    if (seed === undefined || seed === null) seed = freshSeed();
+    if (seed === undefined || seed === null || (typeof seed === "number" && !isFinite(seed))) {
+      seed = freshSeed();
+    }
     seed = seed >>> 0;
     var path = pathFromSeed(seed);
     var bin = binFromPath(path);
