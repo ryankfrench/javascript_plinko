@@ -1,5 +1,5 @@
 Qualtrics.SurveyEngine.addOnload(function () {
-  
+
 });
 
 
@@ -7,21 +7,16 @@ Qualtrics.SurveyEngine.addOnReady(function()
 {
   var q = this;
   var ROUND = 1;
-  var SCRIPT_URL = "https://ryankfrench.github.io/javascript_plinko/plinko.js?v=3";
+  var SCRIPT_URL = "https://ryankfrench.github.io/javascript_plinko/plinko.js?v=4";
   var latest = null;
-  const sessionId = Qualtrics.SurveyEngine.getEmbeddedData("session_id");
-  const subjectId = Qualtrics.SurveyEngine.getEmbeddedData("subject_id");
+  const sessionId = "${e://Field/session_id}";
+  const subjectId = "${e://Field/subject_id}";
 
   function readEmbedded(name) {
     var value = "";
     try {
-      value = Qualtrics.SurveyEngine.getEmbeddedData(name);
-    } catch (err) {}
-    if (value === undefined || value === null || String(value).trim() === "") {
-      try {
-        value = Qualtrics.SurveyEngine.getEmbeddedData("__js_" + name);
-      } catch (err2) {}
-    }
+      value = Qualtrics.SurveyEngine.getJSEmbeddedData("__js_" + name);
+    } catch (err2) {}
     if (value === undefined || value === null) return "";
     return String(value).trim();
   }
@@ -63,9 +58,6 @@ Qualtrics.SurveyEngine.addOnReady(function()
 
   function embed(name, value) {
     try {
-      Qualtrics.SurveyEngine.setEmbeddedData(name, value);
-    } catch (err) {}
-    try {
       Qualtrics.SurveyEngine.setJSEmbeddedData(name, value);
     } catch (err2) {}
   }
@@ -98,11 +90,25 @@ Qualtrics.SurveyEngine.addOnReady(function()
     );
   }
 
+  function stampField(isoName) {
+    if (isoName === "choice_iso") return "decision_click_time";
+    return isoName.replace(/_iso$/, "");
+  }
+
   function writeTimestamps(result) {
     var prefix = "plinko_r" + ROUND + "_";
     TIMESTAMPS.forEach(function (name) {
-      if (result[name]) embed(prefix + name.replace(/_iso$/, ""), formatStamp(result[name]));
+      if (result[name]) embed(prefix + stampField(name), formatStamp(result[name]));
     });
+  }
+
+  var nextClickField = "plinko_r" + ROUND + "_next_click_time";
+  var nextClickRecorded = !!readEmbedded(nextClickField);
+
+  function recordNextClick() {
+    if (nextClickRecorded) return;
+    nextClickRecorded = true;
+    embed(nextClickField, formatStamp(new Date().toISOString()));
   }
 
   function write(result) {
@@ -129,13 +135,28 @@ Qualtrics.SurveyEngine.addOnReady(function()
   }
 
   Qualtrics.SurveyEngine.addOnPageSubmit(function () {
+    recordNextClick();
     if (latest) write(latest);
   });
  
+  function hashSeed(text) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < text.length; i++) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h;
+  }
+
   function getSeed(sessionId, subjectId, round) {
-	  var subject = ("000" + subjectId).slice(-3);
-      var seed = Number(String(sessionId) + subject + String(round));
-	  return seed;
+    var session = sessionId === undefined || sessionId === null ? "" : String(sessionId).trim();
+    var subject = subjectId === undefined || subjectId === null ? "" : String(subjectId).trim();
+    if (!session || !subject) {
+      if (window.console) {
+        console.warn("Plinko seed is missing session_id or subject_id.", session, subject);
+      }
+    }
+    return hashSeed(session + "|" + subject + "|" + String(round));
   }
 
   function rootEl() {
