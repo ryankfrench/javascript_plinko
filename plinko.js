@@ -1149,7 +1149,7 @@
       revealDwellMs:
         userOptions && userOptions.revealDwellMs !== undefined
           ? userOptions.revealDwellMs
-          : 4000,
+          : 10000,
       animation: userOptions && userOptions.animation === "guided-physics" ? "guided-physics" : "guided",
       diskRadius: diskSpec(userOptions && userOptions.diskRadius, userOptions && userOptions.pegRadius).diskRadius,
       pegRadius: diskSpec(userOptions && userOptions.diskRadius, userOptions && userOptions.pegRadius).pegRadius,

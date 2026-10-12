@@ -29,6 +29,7 @@ Qualtrics.SurveyEngine.addOnReady(function()
 
   function showNavigation() {
     q.showNextButton();
+    if (typeof q.enableNextButton === "function") q.enableNextButton();
     if (typeof q.showPreviousButton === "function") q.showPreviousButton();
   }
 
@@ -36,7 +37,8 @@ Qualtrics.SurveyEngine.addOnReady(function()
   if (alreadyDecided) {
     showNavigation();
   } else {
-    q.hideNextButton();
+    q.showNextButton();
+    if (typeof q.disableNextButton === "function") q.disableNextButton();
     if (typeof q.hidePreviousButton === "function") q.hidePreviousButton();
   }
 
@@ -185,6 +187,7 @@ Qualtrics.SurveyEngine.addOnReady(function()
 	  diskRadius: 0.34,
 	  pegRadius: 0.09,
 	  seed: getSeed(sessionId, subjectId, ROUND),
+	  revealDwellMs: 10000,
 	  completed: !!alreadyDecided,
 	  onChoice: function (result) {
 		writeTimestamps(result);

@@ -148,7 +148,7 @@
           },
           dropDurationMs: fast ? 1200 : dropDuration(),
           messageDwellMs: fast ? 250 : 4000,
-          revealDwellMs: fast ? 250 : 4000,
+          revealDwellMs: fast ? 250 : 10000,
           onComplete: function (result) {
             logs.push(result);
             render();
