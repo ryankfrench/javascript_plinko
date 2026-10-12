@@ -1,5 +1,34 @@
 Qualtrics.SurveyEngine.addOnload(function () {
+  var params = new URLSearchParams(window.location.search);
+  var subjectRaw = "${e://Field/subject_id}";
+  if (!/^\d+$/.test(String(subjectRaw).trim())) {
+    subjectRaw = params.get("subject_id") || "";
+  }
+  var earningsRaw = params.get("ug_earnings");
+  if (!earningsRaw) earningsRaw = "${e://Field/ug_earnings}";
 
+  var subjectId = parseInt(String(subjectRaw).trim(), 10);
+  var earnings = String(earningsRaw).split(",");
+  var token = "";
+  if (subjectId >= 1 && subjectId <= earnings.length) {
+    token = earnings[subjectId - 1].trim();
+  }
+  if (!/^-?\d+$/.test(token)) {
+    if (window.console) {
+      console.warn(
+        "Could not read a decision payment from ug_earnings.",
+        subjectRaw,
+        earningsRaw
+      );
+    }
+    return;
+  }
+  try {
+    Qualtrics.SurveyEngine.setJSEmbeddedData(
+      "decision_payment",
+      String(parseInt(token, 10))
+    );
+  } catch (err) {}
 });
 
 
