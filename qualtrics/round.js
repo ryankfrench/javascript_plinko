@@ -36,7 +36,7 @@ Qualtrics.SurveyEngine.addOnReady(function()
 {
   var q = this;
   var ROUND = 1;
-  var SCRIPT_URL = "https://ryankfrench.github.io/javascript_plinko/plinko.js?v=4";
+  var SCRIPT_URL = "https://ryankfrench.github.io/javascript_plinko/plinko.js?v=5";
   var latest = null;
   const sessionId = "${e://Field/session_id}";
   const subjectId = "${e://Field/subject_id}";
@@ -190,6 +190,45 @@ Qualtrics.SurveyEngine.addOnReady(function()
     return hashSeed(session + "|" + subject + "|" + String(round));
   }
 
+  var SUBJECTS_PER_SESSION = 12;
+
+  function integerField(raw) {
+    var text = raw === undefined || raw === null ? "" : String(raw).trim();
+    if (!/^-?\d+$/.test(text)) return null;
+    return parseInt(text, 10);
+  }
+
+  function urnIndex() {
+    var subject = integerField(subjectId);
+    if (subject === null || subject < 1) {
+      return { error: "Plinko subject_id is missing or not a positive integer." };
+    }
+    var past = integerField("${e://Field/past_subject_offset}");
+    var offset = past;
+    if (offset === null) {
+      var session = integerField(sessionId);
+      if (session === null) {
+        return { error: "Plinko session_id is missing or not an integer." };
+      }
+      offset = (session - 1) * SUBJECTS_PER_SESSION;
+    }
+    var index = offset + (subject - 1);
+    if (index < 0) return { error: "Plinko urn index is negative (" + index + ")." };
+    return { index: index };
+  }
+
+  function parseUrn(raw) {
+    if (!raw) return { error: "Plinko urn is missing for round " + ROUND + "." };
+    var list;
+    try {
+      list = JSON.parse(raw);
+    } catch (err) {
+      return { error: "Plinko urn was not JSON." };
+    }
+    if (!Array.isArray(list)) return { error: "Plinko urn was not a list of paths." };
+    return { list: list };
+  }
+
   function rootEl() {
     return (
       document.querySelector("#" + q.questionId + " #plinko-root") ||
@@ -202,19 +241,21 @@ Qualtrics.SurveyEngine.addOnReady(function()
     if (root) root.textContent = "The task could not be loaded. Please tell the experimenter.";
   }
 
-  function started() {
+  function started(path) {
     var root = rootEl();
     if (!root || !window.Plinko) {
       if (window.console) console.error("Plinko did not attach", !!root, !!window.Plinko);
       failed();
       return;
     }
-    window.Plinko.mount(root, {
+    try {
+      window.Plinko.mount(root, {
 	  round: ROUND,
 	  responseId: "${e://Field/ResponseID}",
   	  animation: "guided-physics",
 	  diskRadius: 0.34,
 	  pegRadius: 0.09,
+	  path: path,
 	  seed: getSeed(sessionId, subjectId, ROUND),
 	  revealDwellMs: 10000,
 	  completed: !!alreadyDecided,
@@ -231,17 +272,48 @@ Qualtrics.SurveyEngine.addOnReady(function()
 		write(result);
 		showNavigation();
 	  }
-	});
+      });
+    } catch (err) {
+      if (window.console) console.error(err);
+      failed();
+    }
   }
 
-  var script = document.createElement("script");
-  script.src = SCRIPT_URL;
-  script.onload = started;
-  script.onerror = function () {
-    if (window.console) console.error("Plinko failed to load " + SCRIPT_URL);
+  var urn = parseUrn(readEmbedded("urn_r" + ROUND));
+  var picked = urnIndex();
+  var chosenPath = "";
+  if (picked.error) {
+    if (window.console) console.error(picked.error);
     failed();
-  };
-  document.head.appendChild(script);
+  } else if (urn.error) {
+    if (window.console) console.error(urn.error);
+    failed();
+  } else if (picked.index >= urn.list.length) {
+    if (window.console) {
+      console.error("Plinko urn index " + picked.index + " is past the end of the urn.");
+    }
+    failed();
+  } else if (!/^[LR]{8}$/.test(urn.list[picked.index])) {
+    if (window.console) {
+      console.error("Plinko urn path at index " + picked.index + " is not 8 L/R steps.");
+    }
+    failed();
+  } else {
+    chosenPath = urn.list[picked.index];
+  }
+
+  if (chosenPath) {
+    var script = document.createElement("script");
+    script.src = SCRIPT_URL;
+    script.onload = function () {
+      started(chosenPath);
+    };
+    script.onerror = function () {
+      if (window.console) console.error("Plinko failed to load " + SCRIPT_URL);
+      failed();
+    };
+    document.head.appendChild(script);
+  }
 });
 
 Qualtrics.SurveyEngine.addOnUnload(function()
