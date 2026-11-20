@@ -93,6 +93,33 @@
     };
   }
 
+  function trialFromPath(path, seed) {
+    if (!validPath(path)) {
+      throw new Error("Plinko path is not " + ROWS + " L/R steps.");
+    }
+    if (seed === undefined || seed === null || (typeof seed === "number" && !isFinite(seed))) {
+      seed = freshSeed();
+    }
+    seed = seed >>> 0;
+    var bin = binFromPath(path);
+    return {
+      seed: seed,
+      path: path,
+      bin: bin,
+      payout: PAYOUTS[bin]
+    };
+  }
+
+  function assignedPath(userOptions) {
+    if (!userOptions || userOptions.path === undefined || userOptions.path === null || userOptions.path === "") {
+      return undefined;
+    }
+    if (!validPath(userOptions.path)) {
+      throw new Error("Plinko path is not " + ROWS + " L/R steps.");
+    }
+    return userOptions.path;
+  }
+
   function settle(decision, payout, endowment) {
     return {
       earnings: decision === "play" ? payout : endowment,
@@ -1154,6 +1181,7 @@
       diskRadius: diskSpec(userOptions && userOptions.diskRadius, userOptions && userOptions.pegRadius).diskRadius,
       pegRadius: diskSpec(userOptions && userOptions.diskRadius, userOptions && userOptions.pegRadius).pegRadius,
       seed: userOptions && userOptions.seed !== undefined ? userOptions.seed : undefined,
+      path: assignedPath(userOptions),
       completed: !!(userOptions && userOptions.completed),
       onChoice: userOptions && userOptions.onChoice ? userOptions.onChoice : function () {},
       onAnimationStart: userOptions && userOptions.onAnimationStart ? userOptions.onAnimationStart : function () {},
@@ -1424,7 +1452,7 @@
       playBtn.disabled = true;
       declineBtn.disabled = true;
       var seed = typeof options.seed === "function" ? options.seed() : options.seed;
-      var trial = drawTrial(seed);
+      var trial = options.path ? trialFromPath(options.path, seed) : drawTrial(seed);
       record = createRecord(options, decision, trial);
       markDecision(decision);
       writeStored(key, record);
@@ -1461,8 +1489,8 @@
 
     function showSettledSeed() {
       var seed = readSeed();
-      if (seed === null) return false;
-      var trial = drawTrial(seed);
+      if (!options.path && seed === null) return false;
+      var trial = options.path ? trialFromPath(options.path, seed) : drawTrial(seed);
       record = {
         completed: true,
         seed: trial.seed,
